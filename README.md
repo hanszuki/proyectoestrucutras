@@ -1,2 +1,1 @@
-# proyectoestrucutras
-proyectos de estructuras de datos 2 semestre 
+entrega de proyecto de estructura de datos de Jassen Sanchez, Caroline Corniells y Hannah Poliszuk :)
