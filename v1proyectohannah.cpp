@@ -105,28 +105,33 @@ struct Personaje {
             cout << "3. Ver personajes" << endl;
             cout << "4. modificar y ver estaciones" << endl;
 
-            //sss es por si hace falta meter otra
-            cout << "5. sss" << endl;
+            cout << "5. modificar, eliminar y ver implementos" << endl;
             cout << "7.Salir" << endl;
 
             cin >> opcionmenubase;
 
-            if (opcionmenubase == 1) {
+             if (opcionmenubase == 1) {
                 cout << "¿Deseas crear o modificar personajes?" << endl;
                 cout << "1. Crear personaje" << endl;
                 cout << "2. Modificar personaje" << endl;
+                cout << "3. Eliminar personaje" << endl;
                 cin >> opcioncrearomodificar;
                 if (opcioncrearomodificar == 1) {
                     cout << "elegiste  crear personaje" << endl;
                     //aqui se mete el crear personajes con su debdido struct
 
                 } else if (opcioncrearomodificar == 2) {
-                    cout << "elegiste  modificar personaje" << endl;
+                    cout << "elegiste  modificar personaje,por favor selecciona a quien modificar" << endl;
                     mostrarPersonajes(listadepersonajes);
                     //se selecciona cual se va a modificar
 
+                } else if (opcioncrearomodificar == 3) {
+                    cout << "elegiste  eliminar personaje, selecciona cual eliminar" << endl;
+                    mostrarPersonajes(listadepersonajes);
+                    //se selecciona cual se va a eliminar
+
                 } else {
-                    cout << "Opción no válida. Por favor selecciona 1 o 2" << endl;
+                    cout << "Opción no válida. Por favor selecciona 1, 2 o 3" << endl;
                 }
             } else if (opcionmenubase == 2) {
                 cout << "elegiste  ¿como jugar?" << endl;
@@ -138,11 +143,12 @@ struct Personaje {
 
             }
             //esto es para agregar ago su toca despues
-            else if (opcionmenubase == 4) {
+                       else if (opcionmenubase == 4) {
                 cout << "elegiste  modificar y ver estaciones" << endl;
                 cout << "1. crear estaciones" << endl;
                 cout << "2. ver estaciones" << endl;
                 cout << "3. modificar estaciones" << endl;
+                cout << "4. eliminar estaciones" << endl;
                 cin >> opcioncrearomodificarestaciones;
                 if (opcioncrearomodificarestaciones == 1) {
                     cout << "elegiste  crear estaciones" << endl;
@@ -158,9 +164,35 @@ struct Personaje {
                     cout << "elegiste   modificar estaciones" << endl;
                     cout << listadeestaciones << endl;
                 }
-    G        }
-            else if (opcionmenubase == 5) {
-                cout << "sss" << endl;
+                else if (opcioncrearomodificarestaciones == 4) {
+                    cout << "elegiste eliminar estaciones. Selecciona cual eliminar" << endl;
+                    cout << listadeestaciones << endl;
+                }
+                else {
+                    cout << "Opción no válida. Por favor selecciona 1,2,3 o 4" << endl;
+                }
+                           
+             else if (opcionmenubase == 5) {
+                cout << "elegiste implementos" << endl;
+
+                cout << "¿Deseas crear o modificar implementos?" << endl;
+                cout << "1. Crear implemento" << endl;
+                cout << "2. Modificar implemento" << endl;
+                cout << "3. Eliminar implemento" << endl;
+                    cin >> opcioncrearomodificarimplementos;
+                if (opcioncrearomodificarimplementos == 1) {
+                    cout << "elegiste  crear implemento" << endl;
+                    //aqui se mete el crear implementos con su debdido struct
+
+                } else if (opcioncrearomodificarimplementos == 2) {
+                    cout << "elegiste  modificar implemento,por favor selecciona a quien modificar" << endl;
+                    mostrarImplementos(listadeimplementos);
+                    //se selecciona cual se va a modificar
+
+                } else if (opcioncrearomodificarimplementos == 3) {
+                    cout << "elegiste  eliminar implemento, selecciona cual eliminar" << endl;
+                    mostrarImplementos(listadeimplementos);
+                    //se selecciona cual se va a eliminar
 
             }
             else if (opcionmenubase == 7) {
