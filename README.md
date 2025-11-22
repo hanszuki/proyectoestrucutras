@@ -1,1 +1,1 @@
-Entrega de proyecto de estructura de datos de Jassen Sanchez, Caroline Corniells y Hannah Poliszuk :)
+Entrega de proyecto de estructuras de datos de Jassen Sanchez, Caroline Corniells y Hannah Poliszuk :)
