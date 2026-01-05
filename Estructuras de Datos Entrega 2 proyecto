@@ -1,1 +1,2767 @@
-Entrega 2
+#include <iostream>
+#include <string>
+#include <cstdlib>  
+#include <ctime>
+#include <fstream>  // Para leer archivos
+#include <sstream>  // Para partir las lineas (split)
+using namespace std;
+
+
+//------ ESTRUCTURAS DE DATOS -------
+// --- Bitácora y Resumen de Turno ---
+struct NodoBitacora {
+    string mensaje;
+    string visibilidad; // "Todos", "Ladron", "Policia"
+    NodoBitacora* siguiente;
+};
+
+struct ListaBitacora {
+    NodoBitacora* cabeza = nullptr;
+    NodoBitacora* cola = nullptr;
+};
+
+// --- Dados ---
+struct NodoDado {
+    int valor;
+    NodoDado* siguiente;
+};
+
+struct ListaDados {
+    NodoDado* cabeza = nullptr;
+    int cantidad = 0;
+};
+
+struct ImplementoCatalogo{
+    int id;
+    string nombre;
+    string efecto;  //descripcion 
+    int durabilidad; //maximo de usos
+    string bando; // "Policia", "Ladron", "Ambos"
+    int alcance;
+    ImplementoCatalogo* siguiente;
+};
+
+struct ImplementoInventario{
+    ImplementoCatalogo* itemCatalago;
+    int usosRestantes; //cuando llegue a 0 se debe eliminar el implemento del inventario
+    ImplementoInventario* siguiente;
+};
+
+// --- Mapa ---
+struct Estacion;
+
+struct Conexion {
+    Estacion* destino;
+    int peso;
+    Conexion* siguiente;
+};
+
+struct Estacion {
+    int id; 
+    string nombre;          
+    int oro;
+    Conexion* listaDeConexiones; // Lista de Adyacencias
+    Estacion* siguiente;
+};
+
+struct Personaje{
+    int Id;
+    string nombre;
+    string bando;
+    string tipo;
+    string estado;
+    int puntosDeVida;
+    bool corrupto; //solo se va a utilizar si bando es "policia"
+
+    int oroCargado;
+    int capacidadDeCarga;
+    bool seleccionado;
+
+    Estacion* posicionActual;
+    ImplementoInventario* inventario;
+    Personaje* siguiente;
+};
+
+
+struct ListaPersonajes { 
+    Personaje* cabeza = nullptr; 
+};
+
+struct ListaImplementosCatalogo { 
+    ImplementoCatalogo* cabeza = nullptr; 
+};
+
+struct ListaEstaciones { 
+    Estacion* cabeza = nullptr; 
+};
+
+struct EstadoDeJuego {
+    int turnoActual;
+    // contadores de oro (para los porcentajes de victoria)
+
+    int oroTotalInicial;
+    int oroRobado;
+    int oroRecuperado;
+
+    //Contadores de personajes (para condición de victoria de los policias)
+
+    int totalLadrones;
+    int ladronesCapturados;
+    int corruptosCapturados;
+
+    //Control de flujo
+    bool juegoTerminado;
+    string ganador;
+};
+
+ListaBitacora resumenTurno;
+
+//2. FUNCIONES 
+
+// --- Gestión de Bitacora ---
+void RegistrarEvento(string mensaje, string visibilidad) {
+    // 1. Archivo Físico
+    ofstream archivo("bitacora_partida.txt", ios::app);
+    if (archivo.is_open()) {
+        archivo << "[" << visibilidad << "] " << mensaje << endl;
+        archivo.close();
+    }
+    // 2. Lista Temporal
+    NodoBitacora* nuevo = new NodoBitacora{mensaje, visibilidad, nullptr};
+    if (resumenTurno.cabeza == nullptr) {
+        resumenTurno.cabeza = nuevo;
+        resumenTurno.cola = nuevo;
+    } else {
+        resumenTurno.cola->siguiente = nuevo;
+        resumenTurno.cola = nuevo;
+    }
+}
+
+void MostrarResumenTurno(string bandoLector) {
+    if (resumenTurno.cabeza == nullptr) return;
+    cout << "\n==================================================\n";
+    cout << "RESUMEN DE INTELIGENCIA (Turno anterior)\n";
+    cout << "==================================================\n";
+    NodoBitacora* actual = resumenTurno.cabeza;
+    bool hubo = false;
+    while (actual != nullptr) {
+        if (actual->visibilidad == "Todos" || actual->visibilidad == bandoLector) {
+            cout << ">> " << actual->mensaje << endl;
+            hubo = true;
+        }
+        NodoBitacora* temp = actual;
+        actual = actual->siguiente;
+        delete temp;
+    }
+    resumenTurno.cabeza = nullptr; resumenTurno.cola = nullptr;
+    if (!hubo) cout << "(Sin novedades reportadas)\n";
+    cout << "==================================================\n";
+}
+
+//FUNCIONES DADO
+// Función para limpiar la lista de dados después de cada turno
+void LimpiarDados(ListaDados& lista) {
+    while (lista.cabeza != nullptr) {
+        NodoDado* temp = lista.cabeza;
+        lista.cabeza = lista.cabeza->siguiente;
+        delete temp;
+    }
+    lista.cantidad = 0;
+}
+
+// Función para agregar un resultado de dado
+void AgregarDado(ListaDados& lista, int valor) {
+    NodoDado* nuevo = new NodoDado{valor, nullptr};
+    if (lista.cabeza == nullptr) {
+        lista.cabeza = nuevo;
+    } else {
+        NodoDado* actual = lista.cabeza;
+        while (actual->siguiente != nullptr) {
+            actual = actual->siguiente;
+        }
+        actual->siguiente = nuevo;
+    }
+    lista.cantidad++;
+} 
+
+
+//FUNCIONES PARA VALIDAR 
+int ValidarEntero(const string mensaje){
+    int valor;
+    while(true){
+        cout << mensaje;
+        cin >> valor;
+        if(cin.fail()){
+            cin.clear(); //limpia el cin que tiene error 
+            cin.ignore(1000, '\n'); //Quita la entrada incorrecta
+            cout << "Valor ingresado invalido, por favor ingresar un numero entero.\n";
+        }else{
+            cin.ignore(1000, '\n');
+            return valor;
+        }
+
+    }
+}
+//Para Personaje:
+bool ExisteIdP(ListaPersonajes& lista, int id){
+    Personaje* actual = lista.cabeza;
+    while(actual != nullptr){
+        if(actual->Id == id) return true;
+        actual = actual->siguiente;
+    }
+    return false;
+}
+//Para Implemento:
+bool ExisteIdI(ListaImplementosCatalogo& lista, int id){
+    ImplementoCatalogo* actual = lista.cabeza;
+    while(actual != nullptr){
+        if(actual->id == id) return true;
+        actual = actual->siguiente;
+    }
+    return false;
+}
+//Para Estaciiones:
+bool ExisteIdE(ListaEstaciones &lista, int id){
+    Estacion* actual = lista.cabeza;
+    while(actual != nullptr){
+        if(actual->id == id) return true;
+        actual = actual->siguiente;
+    }
+    return false;
+}
+
+//validacion de strings :/
+bool EstaVacio(const string texto){ //Si esta vacia devuelve true, sino false
+    return texto.empty();
+}
+
+string EliminarEspacios(string texto){ //elimina los espacios al principio y al final del string
+    while(!texto.empty() && isspace(texto.front())){
+        texto.erase(0, 1);
+    }
+    while(!texto.empty() && isspace(texto.back())){
+        texto.pop_back();
+    }
+    return texto;
+}
+
+string ConseguirNombreValido(string nombre){
+    do{
+        cout<< "Ingrese Nombre: ";
+        getline(cin, nombre); 
+        nombre = EliminarEspacios(nombre);
+        if(EstaVacio(nombre)){
+            cout << "Su nombre no puede estar vacio ingrese nombre valido\n";
+        }else{
+            break;
+        }
+    }while(true);
+    return nombre;
+}
+
+bool ExisteNombre(ListaPersonajes& lista, string nombre){
+    Personaje* actual = lista.cabeza;
+    while(actual != nullptr){
+        if(actual->nombre == nombre) return true;
+        actual = actual->siguiente;
+    }
+    return false;
+}
+
+bool ExisteNombreI(ListaImplementosCatalogo& lista, string nombre){
+    ImplementoCatalogo* actual = lista.cabeza;
+    while(actual != nullptr){
+        if(actual->nombre == nombre) return true;
+        actual = actual->siguiente;
+    }
+    return false;
+}
+
+//FUNCIONES CRUD PARA PERSONAJES
+
+//CREATE
+Personaje* MenuCrearPersonaje(ListaPersonajes &lista){
+    //Entrada de datos por usuario
+    int id;
+    string nombre, bando, tipo;
+    int opcion_bando, opcion_tipo;
+    bool corrupto = false;
+    bool validoBando = false;
+    bool validoTipo = false;
+
+    cout << "Vamos a crear un personaje\n";
+    //ID
+    do{
+        id = ValidarEntero("Ingrese ID para su personaje: ");
+        if(ExisteIdP(lista, id)){
+            cout<< "El id ingresado ya existe, por favor ingresar otro distinto.\n";
+        }
+    }while(ExisteIdP(lista, id));
+    //Nombre
+    do{
+        nombre = ConseguirNombreValido(nombre);
+        if(ExisteNombre(lista, nombre)){
+            cout<< "El nombre ingresado ya existe, por favor ingresar otro distinto.\n";
+        }
+    }while(ExisteNombre(lista, nombre));
+    //Bando
+    do{
+        opcion_bando = ValidarEntero("Seleccione el Bando de su personaje: \n1 -> Policia\n2 -> Ladron\n");
+        switch (opcion_bando)
+        {
+            case 1:
+            bando = "Policia";
+            validoBando = true;
+            break;
+            
+            case 2:
+            bando = "Ladron";
+            validoBando = true;
+            break;
+            
+            default:
+            cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+            break;
+        }
+    }while(!validoBando);
+
+    do{
+        if(bando == "Policia"){
+            opcion_tipo = ValidarEntero("Seleccione el Tipo de su Policia (1-5): \n\nTipos de policias:\n1 -> Inspector Jefe\n2 -> Perito Forense\n3 -> Oficial de Asalto\n4 -> Analista de Datos\n5 -> Negociador\n"); 
+        }
+        if(bando == "Ladron"){
+            opcion_tipo = ValidarEntero("Seleccione el Tipo de su ladron (1-6): \n\nTipos de ladrones:\n1 -> Cerebro\n2 -> Fantasma\n3 -> Mulo\n4 -> Saboteador\n5 -> Hacker\n6 -> Lobero(Carismatico)\n"); 
+        }
+        
+        switch (opcion_tipo)
+        {
+            case 1:
+            if (bando == "Policia") {
+            tipo = "Inspector Jefe";
+            }else if(bando == "Ladron"){
+            tipo = "Cerebro";
+            }
+            validoTipo = true;
+            break;
+            
+            case 2:
+            if (bando == "Policia") {
+            tipo = "Perito Forense";
+            }else if(bando == "Ladron"){
+            tipo = "Fantasma";
+            }
+            validoTipo = true;
+            break;
+
+            case 3:
+            if(bando == "Policia"){
+            tipo = "Oficial de Asalto";
+            }else if(bando == "Ladron"){
+            tipo = "Mulo";
+            }
+            validoTipo = true;
+            break;
+            
+            case 4:
+            if(bando == "Policia"){
+            tipo = "Analista de Datos";
+            }else if(bando == "Ladron"){
+            tipo = "Saboteador";
+            }
+            validoTipo = true;
+            break;
+
+            case 5:
+            if(bando == "Policia"){
+            tipo = "Negociador";
+            }else if(bando == "Ladron"){
+            tipo = "Hacker";
+            }
+            validoTipo = true;
+            break;
+            
+            case 6:
+            if(bando == "Policia"){
+            cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+            break;
+            }else if(bando == "Ladron"){
+            tipo = "Lobero (Carismatico)";
+            validoTipo = true;
+            }
+            break;
+
+            default:
+            cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+            break;
+        }
+    }while(!validoTipo);
+
+    //Asignacion de datos
+    Personaje *agregar = new Personaje();
+    agregar->Id = id;
+    agregar->nombre = nombre;
+    agregar->bando = bando;
+    agregar->tipo = tipo;
+    agregar->estado = "activo";
+    agregar->puntosDeVida = 100; //todos inician con vida base.
+    agregar->corrupto = corrupto;
+    agregar->seleccionado = false;
+
+    //Bolsa de oro 
+    agregar->oroCargado = 0;
+    if (tipo == "Mulo") {
+        agregar->capacidadDeCarga = 3; // El Mulo carga el triple
+    } else if (tipo == "Fantasma") {
+        agregar->capacidadDeCarga = 1; // El Fantasma carga limitado
+    } else {
+        agregar->capacidadDeCarga = 2; // Estándar (1 en mano + 1 en bolsillo)
+    }
+
+    agregar->siguiente = nullptr;
+    agregar->inventario = nullptr;
+    agregar->posicionActual = nullptr;
+    return agregar;
+}
+
+void CrearPersonaje(ListaPersonajes &lista){
+    Personaje* agregar = MenuCrearPersonaje(lista);
+    //Agregar al final de la lista
+    if(lista.cabeza == nullptr){
+        lista.cabeza = agregar;
+    }else{
+        Personaje *actual = lista.cabeza;
+        while(actual->siguiente != nullptr){
+            actual = actual->siguiente;
+        }
+        actual->siguiente = agregar;
+    }
+    cout << "Ha creado su personaje correctamente." << endl;
+}
+
+//READ
+Personaje* BuscarPersonaje(ListaPersonajes &lista){
+    int opcionBusqueda;
+    bool validaOpcionBusqueda = false;
+    string valorBusquedaN = "";
+    int valorBusquedaId = 0; 
+
+    if(lista.cabeza == nullptr){
+        cout<<"No existen personajes creados."<< endl;
+        return nullptr;
+    }
+    
+    do{
+        opcionBusqueda = ValidarEntero("Presione 1 si desea buscar su personaje por nombre.\nPresione 2 si desea buscar su personaje por ID.\n");
+        switch (opcionBusqueda)
+        {
+        case 1:
+            valorBusquedaN = ConseguirNombreValido("Ingrese el Nombre de su personaje: ");
+            if(!ExisteNombre(lista, valorBusquedaN)){
+                cout << "Nombre no encontrado, personaje no se encuentra en la lista , ingrese un valor de busqueda correcto\n";
+                break;
+            }
+            validaOpcionBusqueda = true;
+            break;
+        case 2:
+            valorBusquedaId = ValidarEntero("Ingrese el ID de su personaje: ");
+            if(!ExisteIdP(lista, valorBusquedaId)){
+                cout << "ID no encontrado, personaje no se encuentra en la lista, ingrese un valor de busqueda correcto\n";
+                break;
+            }
+            validaOpcionBusqueda = true;
+            break;
+        default:
+            cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+            break;
+        }
+    }while(!validaOpcionBusqueda);
+    
+    Personaje* actual = lista.cabeza;
+    while(actual->nombre != valorBusquedaN && actual->Id != valorBusquedaId){
+        actual = actual->siguiente;
+    }
+    return actual;
+}
+
+void MostrarPersonaje(Personaje* personaje) {
+    if(personaje == nullptr){
+        cout << "No se encontro el personaje \n";
+        return;
+    }
+    cout << "-- Datos del personaje --\n";
+    cout << "ID:     " << personaje->Id << endl;
+    cout << "Nombre: " << personaje->nombre << endl;
+    cout << "Bando:  " << personaje->bando << endl; //bando es si son policias o ladrones
+    cout << "Tipo:   " << personaje->tipo << endl; //tipo de policia o de ladron
+    cout << "Estado: " << personaje->estado << endl;
+    cout << "Puntos de Vida: " << personaje->puntosDeVida << endl;
+    cout << "Inventario de Oro: " << personaje->oroCargado << " / " << personaje->capacidadDeCarga << " lingotes." << endl;
+    //mostrar las cositas del personaje :)
+    cout << "Inventario:" << endl;
+    if (personaje->inventario == nullptr) {
+        cout << " no tienes nada, sigue intentando conseguir cosas" << endl;
+    } else {
+        ImplementoInventario* itemActual = personaje->inventario;
+        while (itemActual != nullptr) {
+            cout << " " << itemActual->itemCatalago->nombre
+            << " (ID: " << itemActual->itemCatalago->id << ")" << endl;
+            itemActual = itemActual->siguiente;
+        }
+    }
+    if (personaje->posicionActual == nullptr) {
+        cout << " no tienes posicion actual asignada" << endl;
+    } else {
+        Estacion* posicionActual = personaje->posicionActual;
+        cout << "Posicion Actual: \n" 
+        << "ID: " << posicionActual->id 
+        << posicionActual->oro << endl;
+    }
+}
+
+void MostrarPersonajes(ListaPersonajes& lista) {
+    //si no hay ningun personaje
+    if (lista.cabeza == nullptr) {
+        cout << "no existen personajes, si gustas crealos" << endl;
+        return;
+    }
+    cout << "-- Lista de Personajes --\n\n";
+    Personaje* actual = lista.cabeza;
+    while (actual != nullptr) {
+        cout << "-- Datos del personaje --\n";
+        cout << "ID: " << actual->Id << endl;
+        cout << "Nombre: " << actual->nombre << endl;
+        //Bando es si son policias o ladrones
+        cout << "Bando: " << actual->bando << endl;
+        //tipo de policia o de ladron
+        cout << "Tipo: " << actual->tipo << endl;
+        //mostrar las cositas de cada personaje :)
+        cout << "Inventario: " << endl;
+        if (actual->inventario == nullptr) {
+            cout << " no tienes nada, sigue intentando conseguir cosas" << endl;
+        } else {
+            ImplementoInventario* itemActual = actual->inventario;
+            while (itemActual != nullptr) {
+                cout << " " << itemActual->itemCatalago->nombre << " (ID: " << itemActual->itemCatalago->id << ")" << endl;
+                itemActual = itemActual->siguiente;
+            }
+        }
+        //ir al siguiente personaje
+        actual = actual->siguiente;
+    }
+}
+
+//UPDATE
+void ModificarPersonaje(ListaPersonajes &lista){
+    Personaje* personaje = BuscarPersonaje(lista);
+    if(personaje == nullptr){
+        cout << "Personaje no encotrado. No se puede modificar.\n";
+        return;
+    }
+    cout << "Su personaje actualmente tiene las siguientes caracteristicas: \n";
+    MostrarPersonaje(personaje);
+    //Menu modificacion
+    cout << "¿Que desea modificar?\n Seleccione una opcion valida:\n";
+    cout << "1 -> Cambiar nombre\n" 
+         << "2 -> Cambiar tipo\n" 
+         << "3 -> Cambiar estado\n"
+         << "4 -> Cambiar puntos de vida\n"  
+         << "5 -> Cancelar\n";
+    int opcionModificar = ValidarEntero("Elija una de las opciones presentadas\n");
+    switch (opcionModificar) {
+    case 1: {
+        personaje->nombre = ConseguirNombreValido(personaje->nombre);
+        cout << "Nombre actualizado con exito\n";
+        break;
+    }
+    
+    case 2:{
+
+        bool validoTipo = false;
+        int opcion_tipo = 0;
+        do{
+            if(personaje->bando == "Policia"){
+                opcion_tipo = ValidarEntero("Seleccione el Tipo de su Policia (1-5): \n\nTipos de policias:\n1 -> Inspector Jefe\n2 -> Perito Forense\n3 -> Oficial de Asalto\n4 -> Analista de Datos\n5 -> Negociador\n"); 
+            }
+            if(personaje->bando == "Ladron"){
+                opcion_tipo = ValidarEntero("Seleccione el Tipo de su ladron (1-6): \n\nTipos de ladrones:\n1 -> Cerebro\n2 -> Fantasma\n3 -> Mulo\n4 -> Saboteador\n5 -> Hacker\n6 -> Lobero(Carismatico)\n"); 
+            }
+            
+            switch (opcion_tipo)
+            {
+                case 1:
+                if (personaje->bando == "Policia") {
+                    personaje->tipo = "Inspector Jefe";
+                }else if(personaje->bando == "Ladron"){
+                    personaje->tipo = "Cerebro";
+                }
+                validoTipo = true;
+                break;
+                
+                case 2:
+                if (personaje->bando == "Policia") {
+                    personaje->tipo = "Perito Forense";
+                }else if(personaje->bando == "Ladron"){
+                    personaje->tipo = "Fantasma";
+                }
+                validoTipo = true;
+                break;
+                
+                case 3:
+                if(personaje->bando == "Policia"){
+                    personaje->tipo = "Oficial de Asalto";
+                }else if(personaje->bando == "Ladron"){
+                    personaje->tipo = "Mulo";
+                }
+                validoTipo = true;
+                break;
+                
+                case 4:
+                if(personaje->bando == "Policia"){
+                    personaje->tipo = "Analista de Datos";
+                }else if(personaje->bando == "Ladron"){
+                    personaje->tipo = "Saboteador";
+                }
+                validoTipo = true;
+                break;
+                
+                case 5:
+                if(personaje->bando == "Policia"){
+                    personaje->tipo = "Negociador";
+                }else if(personaje->bando == "Ladron"){
+                    personaje->tipo = "Hacker";
+                }
+                validoTipo = true;
+                break;
+                
+                case 6:
+                if(personaje->bando == "Policia"){
+                    cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+                    break;
+                }else if(personaje->bando == "Ladron"){
+                    personaje->tipo = "Lobero (Carismatico)";
+                    validoTipo = true;
+                }
+                break;
+                
+                default:
+                cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+                break;
+            }
+        }while(!validoTipo);
+        cout << "Tipo actualizado con exito\n";
+        break;
+    }
+    
+    case 3:{
+
+        bool validoEstado = false;
+        int opcion_estado = 0;
+        do{
+            opcion_estado = ValidarEntero("Seleccione la opcion de nuevo estado (1-3): \nOpciones de estado:\n1 -> Activo\n2 -> Capturado\n3 -> Inhabilitado\n"); 
+            
+            switch (opcion_estado)
+            {
+                case 1:
+                personaje->estado = "Activo";
+                validoEstado = true;
+                break;
+                
+                case 2:
+            personaje->estado = "Capturado";
+            validoEstado = true;
+            break;
+            
+            case 3:
+            personaje->estado = "Inhabilitado";
+            validoEstado = true;
+            break;
+            
+            default:
+            cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+            break;
+        }
+    }while(!validoEstado);
+    cout << "Estado actualizado con exito\n";
+    break;
+    }
+    
+    case 4:{
+        personaje->puntosDeVida = ValidarEntero("Ingrese un valor entre 1 y 100");
+        cout << "Puntos de vida actualizado con exito\n";
+        break;
+    }
+        
+    case 5:{
+        cout << "Modificacion Cancelada\n";
+        break;
+    }
+    default:
+    cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+    break;
+    }
+}
+
+//DELETE
+void LiberarInvetario(ImplementoInventario* inventario) {
+    while (inventario != nullptr) {
+        ImplementoInventario* siguiente = inventario->siguiente;
+        delete inventario;
+        inventario = siguiente;
+    }
+}
+
+void LiberarPersonajes(ListaPersonajes &lista) {
+    Personaje* actual = lista.cabeza;
+    while (actual != nullptr) {
+        Personaje* siguiente = actual->siguiente;
+        //Liberar inventario
+        LiberarInvetario(actual->inventario);
+        delete actual;
+        actual = siguiente;
+    }
+    lista.cabeza = nullptr;
+}
+
+void EliminarPersonaje(ListaPersonajes &lista){
+    if(lista.cabeza == nullptr){
+        cout << "No hay personajes en la lista. \n";
+        return;
+    }
+    cout << "Busquemos a tu seleccionado a eliminar\n";
+    Personaje* condenadoAEliminar = BuscarPersonaje(lista);
+    if(condenadoAEliminar == nullptr){
+        cout << "No se encontro el personaje, no se puede eliminar.\n";
+        return;
+    }
+    Personaje* actual = lista.cabeza;
+    Personaje* previo = nullptr;
+
+    while (actual != nullptr && actual != condenadoAEliminar) {
+        previo = actual;
+        actual = actual->siguiente;
+    }
+
+    // Liberar inventario antes de eliminar
+    LiberarInvetario(actual->inventario);
+
+    // Eliminar el nodo
+    if (previo == nullptr) {
+        lista.cabeza = actual->siguiente; //en caso de ser la cabeza el condenado se pasa de una vez la cabeza al siguiente y delete actual
+    } else {
+        previo->siguiente = actual->siguiente;
+    }
+
+    delete actual;
+    cout << "Personaje eliminado correctamente.\n";
+}
+
+//FUNCIONES CRUD PARA IMPLEMENTOS 
+//CREATE 
+ImplementoCatalogo* MenuCrearImplemento(ListaImplementosCatalogo &lista){
+    //Entrada de datos por usuario
+    int id, durabilidad;
+    string nombre, bando, efecto;
+    int opcion_bando;
+    bool validoBando = false;
+
+    cout << "Vamos a crear un implemento\n";
+    //Durabilidad 
+    durabilidad = ValidarEntero("Ingrese la cantidad de usos maximo de su implemento: ");
+    //Efecto
+    cout << "Describe tu implemento: (Referencia al comportamiento en el juego)\n";
+    getline(cin,efecto);
+
+    //ID
+    do{
+        id = ValidarEntero("Ingrese ID para su implemento: ");
+        if(ExisteIdI(lista, id)){
+            cout<< "El id ingresado ya existe, por favor ingresar otro distinto.\n";
+        }
+    }while(ExisteIdI(lista, id));
+
+
+    //Nombre
+    do{
+        nombre = ConseguirNombreValido(nombre);
+        if(ExisteNombreI(lista, nombre)){
+            cout<< "El nombre ingresado ya existe, por favor ingresar otro distinto.\n";
+        }
+    }while(ExisteNombreI(lista, nombre));
+    //Bando
+    do{
+        opcion_bando = ValidarEntero("Seleccione el Bando que puede acceder al implemento: \n1 -> Policia\n2 -> Ladron\n3 -> Ambos\n");
+        switch (opcion_bando)
+        {
+            case 1:
+            bando = "Policia";
+            validoBando = true;
+            break;
+            
+            case 2:
+            bando = "Ladron";
+            validoBando = true;
+            break;
+
+            case 3:
+            bando = "Ambos";
+            validoBando = true;
+            break;
+            
+            default:
+            cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+            break;
+        }
+    }while(!validoBando);
+
+    //Asignacion de datos a Implemento del catalogo
+    ImplementoCatalogo *agregar = new ImplementoCatalogo();
+    agregar->id = id;
+    agregar->nombre = nombre;
+    agregar->bando = bando;
+    agregar->durabilidad = durabilidad;
+    agregar->efecto = efecto; 
+    agregar->siguiente = nullptr;
+    return agregar;
+}
+
+void CrearImplemento(ListaImplementosCatalogo &lista){
+    ImplementoCatalogo* agregar = MenuCrearImplemento(lista);
+    //Agregar al final de la lista
+    if(lista.cabeza == nullptr){
+        lista.cabeza = agregar;
+    }else{
+        ImplementoCatalogo* actual = lista.cabeza;
+        while(actual->siguiente != nullptr){
+            actual = actual->siguiente;
+        }
+        actual->siguiente = agregar;
+    }
+    cout << "Ha creado su Implemento y se ha agregado al catalogo correctamente." << endl;
+}
+
+// AGREGAR A INVENTARIO
+//READ (Buscar) lo declaramos aqui porque lo llamamos en la funcion de Agregar
+ImplementoCatalogo* BuscarImplementoCatalogo(ListaImplementosCatalogo &lista){
+    int opcionBusqueda;
+    bool validaOpcionBusqueda = false;
+    int valorBusquedaId = 0; 
+
+    if(lista.cabeza == nullptr){
+        cout<<"No existen implementos creados."<< endl;
+        return nullptr;
+    }
+    ImplementoCatalogo* actual = nullptr;
+    do{
+        actual = lista.cabeza;
+        valorBusquedaId = ValidarEntero("Ingrese el ID de su implemento: ");
+        while(actual != nullptr){
+            if(actual->id == valorBusquedaId){
+                break;
+            }
+            actual = actual->siguiente;
+        }
+        if(actual == nullptr){
+            cout << "ID no encontrado. El implemento no se encuentra en la lista, por favor ingresar un id valido\n";
+        }
+    }while(actual == nullptr);
+    return actual;
+}
+
+void AgregarImplementoAInvetario(ListaPersonajes &personajes, ListaImplementosCatalogo &catalogo){
+    if(personajes.cabeza == nullptr){
+        cout << "No existen personajes creados\n";
+        return;
+    }
+    Personaje* personaje = BuscarPersonaje(personajes);
+    if(personaje == nullptr) return;
+    
+    if(catalogo.cabeza == nullptr){
+        cout << "No hay implementos en el catálogo.\n";
+        return;  
+    }
+    cout << "Implementos disponibles para " << personaje->bando << ":\n";
+    //mostrar implementos compatibles
+    ImplementoCatalogo* actual = catalogo.cabeza;
+    while (actual != nullptr) {
+        if(actual->bando == "Ambos" || actual->bando == personaje->bando) {
+            cout << "ID: " << actual->id 
+            << "\nNombre: " << actual->nombre 
+            << "\nDurabilidad: " << actual->durabilidad
+            << "\nEfecto: \n" << actual->efecto;
+        }
+        actual = actual->siguiente;
+    }
+    //Buscar por ID el implemento que se desea agregar
+    ImplementoCatalogo* seleccionado = BuscarImplementoCatalogo(catalogo);
+    if (seleccionado==nullptr) {
+        return;
+    }
+    if (seleccionado->bando != "Ambos" && seleccionado->bando != personaje->bando) {
+        cout << "Este implemento no puede ser usado por personajes del bando " << personaje->bando << ".\n";
+        return;
+    }
+    //Crear la "copia" del implemento que estara en el inventario
+    ImplementoInventario* nuevo = new ImplementoInventario();
+    nuevo->itemCatalago = seleccionado;
+    nuevo->usosRestantes = seleccionado->durabilidad; // comienza con toda la durabilidad
+    nuevo->siguiente = nullptr;
+    //Insertar al final en el inventario deel personaje
+    if(personaje->inventario == nullptr) {
+        personaje->inventario = nuevo;
+    } else {
+        ImplementoInventario* temp = personaje->inventario;
+        while (temp->siguiente != nullptr) {
+            temp = temp->siguiente;
+        }
+        temp->siguiente = nuevo;
+    }
+    cout << "El implemento seleccionado se ha agg al invetario de: " << personaje->nombre << " correctamente. Usalo sabiamente\n";
+}
+
+//READ
+void MostrarCatalogo(ListaImplementosCatalogo& lista) {
+    //si no hay ningun implemento
+    if (lista.cabeza == nullptr) {
+        cout << "no existen implementos, si gustas crealos" << endl;
+        return;
+    }
+    cout << "-- Catalogo --\n\n";
+    ImplementoCatalogo* actual = lista.cabeza;
+    while (actual != nullptr) {
+        cout << "-- Datos del implemento --\n";
+        cout << "ID: " << actual->id << endl;
+        cout << "Nombre: " << actual->nombre << endl;
+        //Bando es si son policias o ladrones o ambos
+        cout << "Bando(Quien lo puede usar): " << actual->bando << endl;
+        //descripcion del comportamiento del implemento
+        cout << "Descripcion: \n" << actual->efecto << endl;
+        //Cantidad de usos maximo 
+        cout << "Durabilidad: \n" << actual->durabilidad << endl; 
+        //ir al siguiente implemento en el catalogo
+        actual = actual->siguiente;
+    }
+}
+
+void MostrarImplementoCatalogo(ImplementoCatalogo* implemento) {
+    if(implemento == nullptr){
+        cout << "No se encontro el implemento \n";
+        return;
+    }
+
+    cout << "-- Datos del implemento --\n";
+    cout << "ID: " << implemento->id << endl;
+    cout << "Nombre: " << implemento->nombre << endl;
+    //Bando es si son policias o ladrones o ambos
+    cout << "Bando(Quien lo puede usar): " << implemento->bando << endl;
+    //descripcion del comportamiento del implemento
+    cout << "Descripcion: \n" << implemento->efecto << endl;
+    //Cantidad de usos maximo 
+    cout << "Durabilidad: \n" << implemento->durabilidad << endl; 
+}
+
+void MostrarInventario(ListaPersonajes& personajes) {
+    Personaje* personaje = BuscarPersonaje(personajes);
+    if(personaje == nullptr){
+        return;
+    }
+    if (personaje->inventario == nullptr) {
+        cout << "El inventario de " << personaje->nombre << " no tiene implementos\n";
+        return;
+    }
+    cout << "Inventario de " << personaje->nombre << ":\n";
+
+    ImplementoInventario* ItemActual = personaje->inventario;
+    int contador = 1;
+    while (ItemActual != nullptr){
+        cout << "Implemento # " << contador << endl;
+        cout << "ID base: " << ItemActual->itemCatalago->id << endl;
+        cout << "Nombre: " << ItemActual->itemCatalago->nombre << endl;
+        cout << "Descripcion: " << ItemActual->itemCatalago->efecto << endl;
+        cout << "Bando: " << ItemActual->itemCatalago->bando << endl;
+        cout << "Durabilidad: " << ItemActual->itemCatalago->durabilidad << endl;
+        cout << "Usos restantes: " << ItemActual->usosRestantes << endl;
+        ItemActual = ItemActual->siguiente;
+        contador++;
+    }
+}
+
+//UPDATE 
+void ModificarImplementoCatalogo(ListaImplementosCatalogo &lista){
+    ImplementoCatalogo* implemento = BuscarImplementoCatalogo(lista);
+    if(implemento == nullptr){
+        cout << "Implemento no encotrado. No se puede modificar.\n";
+        return;
+    }
+    cout << "Su Implemento actualmente tiene las siguientes caracteristicas: \n";
+    MostrarImplementoCatalogo(implemento);
+    //Menu modificacion
+    cout << "¿Que desea modificar?\n Seleccione una opcion valida:\n";
+    cout << "1 -> Cambiar nombre\n" 
+         << "2 -> Cambiar bando\n" 
+         << "3 -> Cambiar id\n"
+         << "4 -> Cambiar durabilidad\n"  
+         << "5 -> Cambiar efecto\n"  
+         << "6 -> Cancelar\n";
+    int opcionModificar = ValidarEntero("Elija una de las opciones presentadas\n");
+    switch (opcionModificar) {
+    case 1: {
+        implemento->nombre = ConseguirNombreValido(implemento->nombre);
+        cout << "Nombre actualizado con exito\n";
+        break;
+    }
+    
+    case 2:{
+
+        bool validoBando = false;
+        int opcion_bando = 0;
+        do{
+            opcion_bando = ValidarEntero("Seleccione la opcion de nuevo estado (1-3): \nOpciones de estado:\n1 -> Policia\n2 -> Ladron\n3 -> Ambos\n"); 
+            
+            switch (opcion_bando)
+            {
+                case 1:
+                implemento->bando = "Policia";
+                validoBando = true;
+                break;
+                
+                case 2:
+                implemento->bando = "Ladron";
+                validoBando = true;
+                break;
+                
+                case 3:
+                implemento->bando = "Ambos";
+                validoBando = true;
+                break;
+                
+                default:
+                cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+                break;
+        }
+    }while(!validoBando);
+    cout << "Bando actualizado con exito\n";
+    break;
+    }
+    
+    case 3:{
+        do{
+            implemento->id = ValidarEntero("Ingrese el nuevo id de su implemento: ");
+            if(ExisteIdI(lista , implemento->id)){
+            cout << "El id ya existe en el catalogo, ingrese un nuevo id\n";   
+            }else{
+                break;
+            }
+        }while(true);
+        cout << "ID actualizado con exito\n";
+        break;
+    }
+
+    case 4:{
+        implemento->durabilidad = ValidarEntero("Ingrese la nueva durabilidad del implemento: ");
+        cout << "Durabilidad actualizado con exito\n";
+        break;
+    }
+
+    case 5:{
+        cout << "Ingrese la nueva descripcion de su implemento: \n";
+        getline(cin, implemento->efecto);
+        cout << "Efecto actualizado con exito\n";
+        break;
+    }
+        
+    case 6:{
+        cout << "Modificacion Cancelada\n";
+        break;
+    }
+    default:
+    cout << "Opcion invalida, por favor ingresar un numero correcto.\n";
+    break;
+    }
+}
+
+void ModificarImplementoInventario(ListaPersonajes &personajes) {
+    Personaje* personaje = BuscarPersonaje(personajes);
+    
+    if(personaje->inventario == nullptr) {
+        cout << "El inventario de: " << personaje->nombre << "no tiene implementos\n";
+        return;
+    }
+    MostrarInventario(personajes);
+    ImplementoInventario* actual = nullptr;
+    do{
+        actual = personaje->inventario;
+        int valorModificar = ValidarEntero("Ingrese el ID del implemento que desea modificar: ");
+        while(actual != nullptr) {
+            if (actual->itemCatalago->id == valorModificar) {
+                cout << "Item a modificar: " << actual->itemCatalago->nombre << endl;
+                actual->usosRestantes = ValidarEntero("Ingrese la cantidad de usos restantes: \n");
+                cout << "Implemento en inventario modificado correctamente\n ";
+                return;
+            }
+            actual = actual->siguiente;
+        }
+        cout << "No se encontro ningun implemento con ese ID, por favor ingresar uno que este en el inventario.";
+    }while(actual == nullptr);
+}
+//DELETE 
+void LiberarCatalogo(ListaImplementosCatalogo &catalogo) {
+    ImplementoCatalogo* actual = catalogo.cabeza;
+    while (actual != nullptr) {
+        ImplementoCatalogo* siguiente = actual->siguiente;
+        delete actual;
+        actual = siguiente;
+    }
+    catalogo.cabeza = nullptr;
+}
+
+void EliminarImplementoCatalogo(ListaImplementosCatalogo &catalogo, ListaPersonajes &personajes){
+    if(catalogo.cabeza == nullptr){
+        cout << "No hay implementos en el catalogo. \n";
+        return;
+    }
+    cout << "Busquemos tu implemento seleccionado a eliminar\n";
+    ImplementoCatalogo* condenadoAEliminar = BuscarImplementoCatalogo(catalogo);
+    if(condenadoAEliminar == nullptr){
+        cout << "No se encontro el implemento, no se puede eliminar.\n";
+        return;
+    }
+    //Eliminar el implemento de cada inventario 
+    Personaje* personajeActual = personajes.cabeza;
+    while (personajeActual != nullptr){
+        ImplementoInventario* actual = personajeActual->inventario;
+        ImplementoInventario* previo = nullptr;
+
+        while (actual != nullptr) {
+            if(actual->itemCatalago == condenadoAEliminar){
+                //eliminacion del nodo del inventario 
+                ImplementoInventario* borrar = actual;
+                actual = actual->siguiente;
+                if(previo == nullptr){
+                    personajeActual->inventario = actual;
+                }else{
+                    previo->siguiente = actual;
+                }
+                delete borrar;
+            }else{
+                previo = actual;
+                actual = actual->siguiente;
+            }
+        }
+        personajeActual = personajeActual->siguiente;
+    }
+    //Eliminar implemento del catalogo
+    ImplementoCatalogo* actual = catalogo.cabeza;
+    ImplementoCatalogo* previo = nullptr;
+    
+    while (actual != nullptr && actual != condenadoAEliminar) {
+        previo = actual;
+        actual = actual->siguiente;
+    }
+    // Eliminar el nodo
+    if (actual != nullptr) {
+        if(previo == nullptr) {
+            catalogo.cabeza = actual->siguiente; //en caso de ser la cabeza el condenado se pasa de una vez la cabeza al siguiente y delete actual
+        } else {
+        previo->siguiente = actual->siguiente;
+    }
+
+    delete actual;
+    cout << "Implemento eliminado del catalogo y de todos los inventarios correctamente.\n";
+    }
+}
+
+void EliminarImplementoInventario(ListaPersonajes &personajes){
+    Personaje* personaje = BuscarPersonaje(personajes);
+    if(personaje->inventario == nullptr){
+        cout << "El inventario de: " << personaje->nombre << "no tiene items\n";
+        return;
+    }
+    MostrarInventario(personajes);
+    int valorEliminar = ValidarEntero("Ingrese el ID del implemento que desea eliminar: ");
+
+    ImplementoInventario* actual = nullptr;
+    ImplementoInventario* previo = nullptr;
+    do{
+        actual = personaje->inventario;
+        while (actual != nullptr) {
+            if (actual->itemCatalago->id == valorEliminar) {
+                if (previo == nullptr) {
+                    personaje->inventario = actual->siguiente;
+                } else {
+                    previo->siguiente = actual->siguiente;
+                }
+                delete actual;
+                cout << "Implemento eliminado correctamente del inventario de " << personaje->nombre << "\n";
+                return;
+            }
+            previo = actual;
+            actual = actual->siguiente;
+        }
+        cout << "No se encontró el ID ingresado en el invetario, por favor ingresar uno correcto\n";
+    }while(actual == nullptr);
+}
+
+//FUNCIONES CRUD PARA ESTACIONES 
+//CREATE
+void CrearEstacion(ListaEstaciones &lista){
+    int id, oro;
+    cout << "Vamos a crear una estacion!\n";
+    //ID
+    do{
+        id = ValidarEntero("Ingrese ID para su estacion: ");
+        if(ExisteIdE(lista, id)){
+            cout<< "El id ingresado ya existe, por favor ingresar otro distinto.\n";
+        }
+    }while(ExisteIdE(lista, id));
+    oro = ValidarEntero("Ingrese la cantidad de oro de la estacion: ");
+    Estacion* agregar = new Estacion{id, "", oro, nullptr, nullptr}; //las llaves asignan directo los datos me hubiese gustado saberlo antes ://
+    if(lista.cabeza == nullptr){
+        lista.cabeza = agregar;
+    }else{
+        Estacion *actual = lista.cabeza;
+        while(actual->siguiente != nullptr){
+            actual = actual->siguiente;
+        }
+        actual->siguiente = agregar;
+    }
+    cout << "Ha creado su Estacion correctamente." << endl;
+}
+
+Estacion* ObtenerOcrear(ListaEstaciones &lista, int idBuscado){
+    Estacion* actual = lista.cabeza;
+    Estacion* ultimo = nullptr;
+
+    // 1. Buscamos si ya existe
+    while (actual != nullptr) {
+        if (actual->id == idBuscado) {
+            return actual; // ¡Existe! La devolvemos
+        }
+        ultimo = actual;
+        actual = actual->siguiente;
+    }
+
+    // 2. Si no existe, la CREAMOS ahora mismo
+    Estacion* nueva = new Estacion();
+    nueva->id = idBuscado;
+    nueva->nombre = "PENDIENTE_DE_CARGA"; // Temporal hasta que leamos su bloque
+    nueva->listaDeConexiones = nullptr;
+    nueva->siguiente = nullptr;
+
+    // 3. La insertamos en la lista principal
+    if (lista.cabeza == nullptr) {
+        lista.cabeza = nueva;
+    } else {
+        ultimo->siguiente = nueva;
+    }
+
+    return nueva;
+} 
+
+void AgregarConexion(ListaEstaciones &lista, int IDOrigen, int IDDestino, int peso){
+    //1. Buscar el origen de la conexion 
+    Estacion* nodoOrigen = ObtenerOcrear(lista, IDOrigen);
+    Estacion* nodoDestino = ObtenerOcrear(lista, IDDestino);
+
+    //Validacion: si ya estan conectadas, no tiene sentido que las conectemos 
+    Conexion* tempConexion = nodoOrigen->listaDeConexiones;
+    while(tempConexion != nullptr){
+        if(tempConexion->destino->id == IDDestino){
+            cout << "Ya existe una conexion desde " << IDOrigen << " hasta " << IDDestino << ".\n";
+            tempConexion->peso = peso;
+            return;
+        }
+        tempConexion = tempConexion->siguiente;
+        }
+    
+    //4:Crear Conexion 
+    Conexion* nuevaConexion = new Conexion{nodoDestino, peso, nullptr};
+
+    //5: insertar al final de la lista de adyacencia 
+    if(nodoOrigen->listaDeConexiones == nullptr){
+        nodoOrigen->listaDeConexiones = nuevaConexion;
+    }else{
+        Conexion* aux = nodoOrigen->listaDeConexiones;
+        while(aux->siguiente != nullptr){
+            aux = aux->siguiente;
+        }
+        aux->siguiente = nuevaConexion;
+    }
+    //cout << "Conexion Creada: Estacion " << IDOrigen << " -> Estacion " << IDDestino << " (Peso: " << peso << ")\n";
+    // lo comentamos porque al inicio al cargar el codigo ocupaba mucho espacio
+    }
+
+
+
+//READ
+void MostrarEstaciones(ListaEstaciones &lista) {
+    if (lista.cabeza == nullptr) {
+        cout << "No existen estacionees aun\n";
+        return;
+    }
+    Estacion* actual = lista.cabeza;
+    cout << "\n--- MAPA DE LA RED DE METRO ---\n";
+
+    while (actual != nullptr) {
+        cout << "Estacion [" << actual->id << "] | Oro: " << actual->oro << " | Conecta con: ";
+        //Recorrer la lista de conexiones (adyacencias)
+        Conexion* c = actual->listaDeConexiones;
+        if(c == nullptr){
+            cout << "No tiene conexiones \n";
+        }else{
+            while(c != nullptr){
+                cout << "-> [" << c->destino->id << "] ";
+                c = c->siguiente;
+            }
+        }
+        cout << endl;
+        actual = actual->siguiente;
+    }
+    cout << "-----------------------------\n";
+}
+
+Estacion* BuscarEstacion(ListaEstaciones& lista) {
+    if (lista.cabeza == nullptr) {
+        cout << "No hay estaciones, no hay nada que buscar\n";
+        return nullptr;
+    }
+    Estacion* actual = nullptr;
+    do{
+        cout << "Estaciones disponibles:\n";
+        MostrarEstaciones(lista);
+        
+        int valorBuscar = ValidarEntero("Ingrese el ID de la estación que desea seleccionar: ");
+        actual = lista.cabeza;
+        
+        while (actual != nullptr) {
+            if (actual->id == valorBuscar){
+                break;
+            }   
+            actual = actual->siguiente;
+        }
+        cout << "No se encontró una estación con ese ID, por favor ingresar un id valido\n";
+    }while(actual == nullptr);
+    return actual;
+}
+
+//UPDATE
+void ModificarEstacion(ListaEstaciones& lista) {
+    Estacion* estacion = BuscarEstacion(lista);
+    if (estacion == nullptr){
+        return;
+    }
+    cout << "Datos de la estacion:\n ID: " << estacion->id << "\nOro: " << estacion->oro << endl;
+    estacion->oro = ValidarEntero("Ingrese el nuevo valor de oro: ");
+    cout << "Estación modificada correctamente.\n";
+}
+
+//DELETE 
+void EliminarEstacion(ListaEstaciones& lista) {
+    if (lista.cabeza == nullptr) {
+        cout << "No hay estaciones creadas, no se puede eliminar.\n";
+        return;
+    }
+
+    Estacion* eliminar = BuscarEstacion(lista);
+    if (eliminar == nullptr) return;
+
+    Estacion* actual = lista.cabeza;
+    Estacion* previo = nullptr;
+
+    while (actual != nullptr) {
+        if (actual == eliminar) {
+            if (previo == nullptr) {
+                lista.cabeza = actual->siguiente;
+            } else {
+                previo->siguiente = actual->siguiente;
+            }
+            delete actual;
+            cout << "Estación eliminada correctamente.\n";
+            return;
+        }
+        previo = actual;
+        actual = actual->siguiente;
+    }
+}
+
+void LiberarEstaciones(ListaEstaciones& lista) {
+    Estacion* actual = lista.cabeza;
+    while (actual != nullptr) {
+        Estacion* temp = actual;
+        actual = actual->siguiente;
+        delete temp;
+    }
+    lista.cabeza = nullptr;
+}
+
+//Funciones para la carga de archivos:
+ImplementoCatalogo* ConseguirImplementoPorId(ListaImplementosCatalogo &catalogo, int id){
+    ImplementoCatalogo* actual = catalogo.cabeza;
+    while(actual != nullptr){
+        if(actual->id == id){
+            return actual;
+        }else{
+            actual = actual -> siguiente;
+        }
+    }
+    return nullptr;
+}
+
+void AsignarItemAPersonaje(Personaje* personaje, int idItem, ListaImplementosCatalogo& catalogo) {
+    ImplementoCatalogo* itemBase = ConseguirImplementoPorId(catalogo, idItem);
+    if(itemBase == nullptr){
+        return; // Si el item no existe, ignorar
+    } 
+    ImplementoInventario* nuevo = new ImplementoInventario();
+    nuevo->itemCatalago = itemBase;
+    nuevo->usosRestantes = itemBase->durabilidad;
+    nuevo->siguiente = nullptr;
+
+    if(personaje->inventario == nullptr) {
+        personaje->inventario = nuevo;
+    } else {
+        ImplementoInventario* aux = personaje->inventario;
+        while(aux->siguiente != nullptr){
+            aux = aux->siguiente;
+        }
+        aux->siguiente = nuevo;
+    }
+}
+
+void CargaImplementos(ListaImplementosCatalogo &catalogo, string nombreArchivo){
+    ifstream archivo(nombreArchivo);
+    if(!archivo.is_open()){
+        cout << "ERROR: el archivo " << nombreArchivo << " no se pudo abrir correctamente.\n";
+        return;
+    }
+
+    string linea;
+    //Salto la primera linea
+    getline(archivo, linea);
+    //comenzamos en la segunda linea
+    while(getline(archivo, linea)){
+        if(linea == "---"){
+            //iniciaria la info del implemento 
+            ImplementoCatalogo* nuevo = new ImplementoCatalogo();
+            string temp;
+            // 1. ID
+            getline(archivo, temp);
+            if(temp.empty()) break; // Fin de archivo o error
+            nuevo->id = stoi(temp);
+
+            // 2. Bando
+            getline(archivo, nuevo->bando); // "Ladron" o "Policia"
+
+            // 3. Nombre
+            getline(archivo, nuevo->nombre);
+
+            // 4. Función (Formato: "Función: Movilidad...")
+            getline(archivo, temp);
+            // Buscamos los dos puntos y tomamos lo que sigue + 1 espacio
+            size_t pos = temp.find(":");
+            if (pos != string::npos) {
+                nuevo->efecto = temp.substr(pos + 2); 
+            }
+
+            // 5. Uso (Formato: "Uso: 1")
+            getline(archivo, temp);
+            pos = temp.find(":");
+            if (pos != string::npos) {
+                nuevo->durabilidad = stoi(temp.substr(pos + 2));
+            }
+            
+            // 6. Alcance (Formato: "Alcance: 0")
+            getline(archivo, temp); 
+            pos = temp.find(":");
+            if (pos != string::npos) {
+                nuevo->alcance = stoi(temp.substr(pos + 2));
+            }
+            nuevo->siguiente = nullptr;
+
+            //Insertamos en la lista de catalogo 
+            if (catalogo.cabeza == nullptr) {
+                catalogo.cabeza = nuevo;
+            } else {
+                ImplementoCatalogo* aux = catalogo.cabeza;
+                while (aux->siguiente != nullptr){
+                    aux = aux->siguiente;
+                }
+                    aux->siguiente = nuevo;
+            }
+        }
+    }
+    archivo.close();
+    cout << "Implementos cargados exitosamente." << endl;
+}
+
+void CargarMapa(ListaEstaciones &lista, string nombreArchivo) {
+    ifstream archivo(nombreArchivo);
+    if (!archivo.is_open()) {
+        cout << "Error archivo." << endl;
+        return;
+    }
+
+    string linea;
+
+    // 1. DESCARTAR EL ENCABEZADO (El "30" inicial)
+    // Leemos la primera línea y la tiramos a la basura porque es solo la cantidad total
+    getline(archivo, linea); 
+
+    // 2. BUCLE PRINCIPAL
+    while (getline(archivo, linea)) {
+        
+        // Si la línea está vacía O contiene los guiones separadores "---" volvemos al inicio del bucle. No hacemos nada.
+        if (linea.empty() || linea.find("---") != string::npos) {
+            continue; 
+        }
+        // Como ya filtramos la basura, 'linea' TIENE que ser el ID (ej: "1")
+        
+        // A. Parsear ID
+        int idOrigen = stoi(linea); // Seguro de usar porque ya sabemos que no es "---"
+        Estacion* nodoActual = ObtenerOcrear(lista, idOrigen);
+
+        // B. Leer Nombre (Siguiente linea obligatoria)
+        string nombre;
+        getline(archivo, nombre);
+        nodoActual->nombre = nombre;
+
+        // C. Leer el guion intermedio "-" (Lo leemos para descartarlo)
+        string basura;
+        getline(archivo, basura);
+
+        // D. Leer Conexiones
+        string lineaConexiones;
+        getline(archivo, lineaConexiones);
+
+        // E. Procesar Conexiones (Tu logica estandar)
+        stringstream ss(lineaConexiones);
+        string segmento;
+        while (getline(ss, segmento, '|')) {
+            size_t pos = segmento.find(':');
+            if (pos != string::npos) {
+                // Pequeña validacion extra por seguridad
+                string sDest = segmento.substr(0, pos);
+                string sPeso = segmento.substr(pos + 1);
+                
+                if(!sDest.empty() && !sPeso.empty()) {
+                    AgregarConexion(lista, idOrigen, stoi(sDest), stoi(sPeso));
+                }
+            }
+        }
+        
+        // El bucle volverá a empezar, leerá el "---" en la siguiente vuelta,
+        // entrará en el 'if' de arriba y lo saltará automáticamente.
+    }
+
+    archivo.close();
+    cout << "Mapa cargado." << endl;
+}
+
+//Funcion aux para el tipo de personaje 
+void AsignarRolYCapacidad(Personaje* p) {
+    
+    bool rolAsignado = false;
+    string n = p->nombre;
+
+    // --- INTENTO 1: BUSCAR EL ROL EN EL NOMBRE ---
+    if (p->bando == "Ladron") {
+        if (n.find("Cerebro") != string::npos) p->tipo = "Cerebro";
+        else if (n.find("Fantasma") != string::npos) p->tipo = "Fantasma";
+        else if (n.find("Mulo") != string::npos) p->tipo = "Mulo";
+        else if (n.find("Saboteador") != string::npos) p->tipo = "Saboteador";
+        else if (n.find("Hacker") != string::npos) p->tipo = "Hacker";
+        else if (n.find("Lobero") != string::npos) p->tipo = "Lobero";
+    } else if (p->bando == "Policia") {
+        if (n.find("Inspector") != string::npos || n.find("Comisaria") != string::npos) p->tipo = "Inspector Jefe";
+        else if (n.find("Forense") != string::npos || n.find("Perito") != string::npos) p->tipo = "Perito Forense";
+        else if (n.find("Asalto") != string::npos || n.find("Oficial") != string::npos) p->tipo = "Oficial de Asalto";
+        else if (n.find("Analista") != string::npos || n.find("Datos") != string::npos) p->tipo = "Analista de Datos";
+        else if (n.find("Negociador") != string::npos) p->tipo = "Negociador";
+    }
+
+    // --- INTENTO 2: SI NO SE ENCONTRÓ ROL, ASIGNAR ALEATORIO (Para que el juego funcione) ---
+    if (p->tipo.empty() || p->tipo == "Agente") {
+        // rolAsignado sigue falso
+        int azar; 
+        if (p->bando == "Ladron") {
+            azar = rand() % 6; // 0 a 5
+            string roles[] = {"Cerebro", "Fantasma", "Mulo", "Saboteador", "Hacker", "Lobero"};
+            p->tipo = roles[azar];
+        } else {
+            azar = rand() % 5; // 0 a 4
+            string roles[] = {"Inspector Jefe", "Perito Forense", "Oficial de Asalto", "Analista de Datos", "Negociador"};
+            p->tipo = roles[azar];
+        }
+    }
+
+    // --- CONFIGURAR CAPACIDAD SEGÚN EL TIPO DEFINIDO ---
+    p->oroCargado = 0;
+    
+    if (p->tipo == "Mulo") {
+        p->capacidadDeCarga = 3; 
+    } else if (p->tipo == "Fantasma") {
+        p->capacidadDeCarga = 1; 
+    } else {
+        p->capacidadDeCarga = 2; // Estándar para el resto
+    }
+}
+
+void CargarPersonajes(ListaPersonajes &listaP, ListaImplementosCatalogo &cat, string nombreArchivo) {
+    ifstream archivo(nombreArchivo);
+    if (!archivo.is_open()) {
+        cout << "Error: No se encontro " << nombreArchivo << endl;
+        return;
+    }
+    string linea;
+    getline(archivo, linea); // Saltar la primera linea (ej: "12")
+
+    // Inicializar semilla random para los roles aleatorios
+    srand(time(0)); 
+
+    while (getline(archivo, linea)) {
+        // Omitir separadores o lineas vacias
+        if (linea == "---" || linea.empty()) continue;
+
+        // Asumimos que la linea actual es el ID (porque saltamos el "---")
+        
+        Personaje* nuevo = new Personaje();
+        
+        // 1. ID
+        // Como 'linea' ya tiene el numero (ej: "1"), lo usamos directo.
+
+        try {
+            nuevo->Id = stoi(linea);
+        } catch (...) {
+            // Si falla, intentamos leer la siguiente linea por seguridad
+            getline(archivo, linea);
+            nuevo->Id = stoi(linea);
+        }
+
+        // 2. Bando (ej: "Policia")
+        getline(archivo, nuevo->bando);
+        nuevo->bando = EliminarEspacios(nuevo->bando);
+
+        // 3. Nombre (ej: "Diana "Sombra" Vega") -> DE AQUÍ SACAMOS EL TIPO
+        getline(archivo, nuevo->nombre);
+        nuevo->nombre = EliminarEspacios(nuevo->nombre);
+        
+        // LLAMADA A LA LÓGICA DE ROLES
+        AsignarRolYCapacidad(nuevo); 
+
+        // 4. Items (ej: "3|6")
+        string lineaItems;
+        getline(archivo, lineaItems);
+
+        // --- RESTO DE INICIALIZACION ---
+        nuevo->estado = "Activo";
+        nuevo->puntosDeVida = 100;
+        nuevo->corrupto = false;
+        nuevo->seleccionado = false;
+        nuevo->posicionActual = nullptr;
+        nuevo->inventario = nullptr;
+        nuevo->siguiente = nullptr;
+
+        // Carga de items parseando los '|'
+        if (lineaItems != "-" && !lineaItems.empty()) {
+            stringstream ss(lineaItems);
+            string idStr;
+            while (getline(ss, idStr, '|')) {
+                if(!idStr.empty() && idStr != " ") {
+                    try {
+                        AsignarItemAPersonaje(nuevo, stoi(idStr), cat);
+                    } catch (...) {}
+                }
+            }
+        }
+
+        // Agregar a la lista
+        if (listaP.cabeza == nullptr) listaP.cabeza = nuevo;
+        else {
+            Personaje* aux = listaP.cabeza;
+            while (aux->siguiente) aux = aux->siguiente;
+            aux->siguiente = nuevo;
+        }
+    }
+    archivo.close();
+    cout << "Personajes cargados y roles asignados correctamente.\n";
+}
+
+
+//Funcion de Inicializacion del juego 
+void InicializarEstado(EstadoDeJuego &estado, ListaEstaciones &mapa, ListaPersonajes &personajes) {
+// 1. Contadores básicos
+    estado.turnoActual = 1; 
+    estado.juegoTerminado = false;
+    estado.ladronesCapturados = 0; 
+    estado.corruptosCapturados = 0;
+    estado.oroRecuperado = 0; 
+    estado.oroRobado = 0;
+    estado.oroTotalInicial = 0; 
+    estado.totalLadrones = 0;   
+
+    // Repartir Oro
+    Estacion* e = mapa.cabeza; while(e){ e->oro = 0; e=e->siguiente; }
+    int estCount = 0; e = mapa.cabeza; while(e){ estCount++; e=e->siguiente; }
+    if(estCount > 0) {
+        cout << "Distribuyendo 50 lingotes...\n";
+        for(int i=0; i<50; i++) {
+            int r = rand() % estCount;
+            Estacion* t = mapa.cabeza; for(int k=0;k<r;k++) t=t->siguiente;
+            t->oro++;
+        }
+    }
+
+    //Calcular totales para condicione de victoria 
+    // A. Sumar todo el oro que acabamos de repartir
+    e = mapa.cabeza;
+    while(e != nullptr) {
+        estado.oroTotalInicial += e->oro;
+        e = e->siguiente;
+    }
+
+    // B. Contar cuántos ladrones hay en el equipo
+    Personaje* p = personajes.cabeza;
+    while(p != nullptr) {
+        // Solo contamos los que están seleccionados para jugar
+        if(p->bando == "Ladron" && p->seleccionado) {
+            estado.totalLadrones++;
+        }
+        p = p->siguiente;
+    }
+    
+    cout << ">> CONFIGURACION: " << estado.oroTotalInicial << " Lingotes en juego | " 
+         << estado.totalLadrones << " Ladrones activos.\n";
+
+    // Corruptos
+    cout << "\n--- CONFIDENCIAL: AGENTES CORRUPTOS (Solo Ladrones miren) ---\n";
+    int pActivos = 0; 
+    p = personajes.cabeza;
+    while(p){ p->corrupto = false; if(p->bando=="Policia" && p->seleccionado) pActivos++; p=p->siguiente; }
+    
+    if(pActivos >= 2) {
+        int c1 = rand() % pActivos; int c2 = c1;
+        while(c2 == c1) c2 = rand() % pActivos;
+        int cont = 0; p = personajes.cabeza;
+        while(p) {
+            if(p->bando=="Policia" && p->seleccionado) {
+                if(cont == c1 || cont == c2) {
+                    p->corrupto = true;
+                    cout << ">> INFILTRADO: " << p->nombre << endl;
+                }
+                cont++;
+            }
+            p=p->siguiente;
+        }
+    }
+    cout << "Presione ENTER para continuar..."; cin.ignore(); cin.get();
+}
+
+// LÓGICA DE VALIDACIÓN DE MOVIMIENTO
+
+bool RutaExiste(Estacion* actual, int idDestino, int pasosRestantes) {
+    if (pasosRestantes == 0) return (actual->id == idDestino);
+
+    Conexion* conex = actual->listaDeConexiones;
+    while (conex != nullptr) {
+        if (RutaExiste(conex->destino, idDestino, pasosRestantes - 1)) return true; 
+        conex = conex->siguiente;
+    }
+    return false;
+}
+
+bool EsMovimientoValido(Personaje* p, int idDestino, int valorDado) {
+    if (p->posicionActual == nullptr) return false;
+    // Verifica si hay camino exacto con el valor del dado
+    return RutaExiste(p->posicionActual, idDestino, valorDado);
+}
+
+// Lógica de interacción automática con el oro 
+void RecogerOroAutomatico(Personaje* p) {
+    if (p->posicionActual->oro > 0) {
+        cout << "   [!] ¡Se ha detectado ORO en la estacion!\n";
+        if (p->oroCargado < p->capacidadDeCarga) {
+            int espacioDisponible = p->capacidadDeCarga - p->oroCargado;
+            int cantidadATomar = (p->posicionActual->oro >= espacioDisponible) ? espacioDisponible : p->posicionActual->oro;
+
+            p->oroCargado += cantidadATomar;
+            p->posicionActual->oro -= cantidadATomar;
+
+            cout << "       -> Recogiste " << cantidadATomar << " lingote(s).\n";
+            cout << "       -> Estado del Bolso: " << p->oroCargado << " / " << p->capacidadDeCarga << "\n";
+        } else {
+            cout << "       -> [X] Bolso lleno (" << p->oroCargado << "/" << p->capacidadDeCarga << ").\n";
+        }
+    }
+}
+
+// Función auxiliar para detectar enemigos en la misma sala
+void VerificarEnemigosEnZona(Personaje* pActual, ListaPersonajes& listaP) {
+    if (pActual->bando != "Policia") return; // Solo los policías reciben alertas visuales
+
+    Personaje* sospechoso = listaP.cabeza;
+    bool avistamiento = false;
+
+    while (sospechoso != nullptr) {
+        // Si es Ladrón, está en MI misma estación y está Activo
+        if (sospechoso->bando == "Ladron" && 
+            sospechoso->posicionActual == pActual->posicionActual && 
+            sospechoso->estado == "Activo") {
+            
+            if (!avistamiento) cout << "\n   !!! ALERTA DE CONTACTO !!!\n";
+            cout << "   [OJOS] Visualizas al objetivo: " << sospechoso->nombre << " (" << sospechoso->tipo << ") aqui mismo.\n";
+            avistamiento = true;
+        }
+        sospechoso = sospechoso->siguiente;
+    }
+
+    if (avistamiento) {
+        cout << "   (Puedes usar la accion 'Capturar' en el menu de turno)\n";
+    }
+}
+
+// Función principal de movimiento 
+// NOTA: Necesitamos pasar la lista completa de personajes para buscar enemigos
+void MoverPersonaje(Personaje* p, Estacion* destino, ListaPersonajes& listaTotal) {
+    // 1. Mover
+    p->posicionActual = destino;
+    cout << ">> Te has movido a Estacion " << destino->id << ".\n";
+
+    // 2. Recoger Oro
+    RecogerOroAutomatico(p);
+
+    // 3. Detectar Enemigos 
+    VerificarEnemigosEnZona(p, listaTotal);
+}
+
+//Despliegue de personajes 
+
+void FaseCreacionOpcional(ListaPersonajes& personajes) {
+    cout << "\n=========================================\n";
+    cout << "   FASE DE GESTION DE PERSONAJES EXTRA   \n";
+    cout << "=========================================\n";
+    
+    int opcion = 0;
+    do {
+        cout << "¿Desea crear un nuevo personaje personalizado antes de seleccionar equipos?\n";
+        cout << "1. Si, crear personaje\n";
+        cout << "2. No, continuar a la seleccion\n";
+        opcion = ValidarEntero("Opcion: ");
+
+        if (opcion == 1) {
+            CrearPersonaje(personajes); // Llama a tu función existente
+            // Importante: Asegúrate que CrearPersonaje ponga enEquipo = false;
+        }
+    } while (opcion != 2);
+}
+
+void FaseSeleccionEquipos(ListaPersonajes& personajes) {
+    cout << "\n============================================\n";
+    cout << "   FASE DE SELECCION DE EQUIPOS \n";
+    cout << "============================================\n";
+    
+    // Preguntamos el modo de selección
+    cout << "¿Como desea conformar los equipos?\n";
+    cout << "1. Seleccion Manual (Draft: Elegir 6 por bando uno a uno)\n";
+    cout << "2. Despliegue Total (Seleccionar AUTOMATICAMENTE a todos los personajes de la lista)\n";
+    int modo = ValidarEntero("Seleccione opcion: ");
+
+    string bandos[] = {"Ladron", "Policia"};
+
+    // Repetimos el proceso para cada bando
+    for (int i = 0; i < 2; i++) {
+        string bandoActual = bandos[i];
+        cout << "\n>>> ARMANDO EQUIPO: " << (bandoActual == "Policia" ? "POLICIA" : "LADRON") << " <<<\n";
+        
+        if (modo == 2) {
+            // --- MODO AUTOMATICO (TODOS) ---
+            int count = 0;
+            Personaje* p = personajes.cabeza;
+            while(p != nullptr) {
+                // Selecciona a todo aquel que sea del bando y este activo
+                if(p->bando == bandoActual && p->estado == "Activo") {
+                    p->seleccionado = true;
+                    count++;
+                    cout << " + Agregado al equipo: " << p->nombre << " (" << p->tipo << ")\n";
+                }
+                p = p->siguiente;
+            }
+            cout << ">> Total agentes desplegados: " << count << "\n";
+            
+            if (count == 0) cout << "   [!] Advertencia: No hay personajes de este bando en la lista.\n";
+
+        } else {
+            // --- MODO MANUAL (Tu lógica original de Draft 6 vs 6) ---
+            int seleccionadosCount = 0;
+            while (seleccionadosCount < 6) {
+                cout << "\n-- Personajes Disponibles (" << bandoActual << ") --\n";
+                
+                // Mostrar disponibles
+                Personaje* p = personajes.cabeza;
+                bool hayDisponibles = false;
+                while (p != nullptr) {
+                    if (p->bando == bandoActual && !p->seleccionado) {
+                        cout << "ID: " << p->Id << " | " << p->nombre << " (" << p->tipo << ")\n";
+                        hayDisponibles = true;
+                    }
+                    p = p->siguiente;
+                }
+
+                if (!hayDisponibles) {
+                    cout << "AVISO: No hay mas personajes disponibles para seleccionar.\n";
+                    break;
+                }
+
+                cout << "Selecciona el personaje #" << (seleccionadosCount + 1) << " (0 para terminar antes): ";
+                int idSeleccion = ValidarEntero("Ingrese ID: ");
+
+                if (idSeleccion == 0) break; // Salida anticipada opcional
+
+                // Buscar y marcar
+                p = personajes.cabeza;
+                bool encontrado = false;
+                while (p != nullptr) {
+                    if (p->Id == idSeleccion && p->bando == bandoActual && !p->seleccionado) {
+                        p->seleccionado = true;
+                        cout << ">> " << p->nombre << " se ha unido al equipo.\n";
+                        seleccionadosCount++;
+                        encontrado = true;
+                        break;
+                    }
+                    p = p->siguiente;
+                }
+
+                if (!encontrado) cout << "ID invalido, de otro bando o ya seleccionado.\n";
+            }
+            cout << "Equipo " << bandoActual << " listo con " << seleccionadosCount << " miembros.\n";
+        }
+    }
+}
+void FaseEquipamiento(ListaPersonajes& personajes, ListaImplementosCatalogo& catalogo) {
+    cout << "\n============================================\n";
+    cout << "   FASE DE EQUIPAMIENTO ESTRATEGICO        \n";
+    cout << "   (Maximo 3 items por agente)             \n";
+    cout << "============================================\n";
+
+    Personaje* p = personajes.cabeza;
+    while (p != nullptr) {
+        // Solo equipamos a los que van a jugar
+        if (p->seleccionado) {
+            bool terminadaCarga = false;
+            
+            while (!terminadaCarga) {
+                // 1. Contar items actuales
+                int itemsActuales = 0;
+                ImplementoInventario* inv = p->inventario;
+                while (inv != nullptr) { itemsActuales++; inv = inv->siguiente; }
+
+                cout << "\n------------------------------------------------\n";
+                cout << " AGENTE: " << p->nombre << " (" << p->bando << ")\n";
+                cout << " Mochila: " << itemsActuales << " / 3 espacios ocupados.\n";
+                
+                // Mostrar lo que ya tiene (si cargó algo del archivo)
+                inv = p->inventario;
+                if(inv) cout << " Items actuales: ";
+                while(inv) { cout << "[" << inv->itemCatalago->nombre << "] "; inv = inv->siguiente; }
+                cout << endl;
+
+                if (itemsActuales >= 3) {
+                    cout << " >> Mochila llena. Pasando al siguiente agente.\n";
+                    terminadaCarga = true;
+                    break;
+                }
+
+                // 2. Preguntar
+                cout << " Opciones:\n 1. Agregar Item\n 2. Limpiar Inventario (Empezar de 0)\n 3. Listo / Siguiente Agente\n";
+                int op = ValidarEntero(" Seleccion: ");
+
+                if (op == 3) {
+                    terminadaCarga = true;
+                }
+                else if (op == 2) {
+                    LiberarInvetario(p->inventario);
+                    p->inventario = nullptr;
+                    cout << " >> Inventario vaciado.\n";
+                }
+                else if (op == 1) {
+                    // 3. Mostrar Catalogo Compatible
+                    cout << "\n   [ ARMERIA DISPONIBLE PARA " << p->bando << " ]\n";
+                    ImplementoCatalogo* c = catalogo.cabeza;
+                    bool hayItems = false;
+                    while (c != nullptr) {
+                        // Filtro por Bando: El item debe ser "Ambos" o del mismo bando del personaje
+                        if (c->bando == "Ambos" || c->bando == p->bando) {
+                            cout << "   ID " << c->id << " | " << c->nombre 
+                                 << " (Usos: " << c->durabilidad << ") -> " << c->efecto << endl;
+                            hayItems = true;
+                        }
+                        c = c->siguiente;
+                    }
+
+                    if (!hayItems) {
+                        cout << "   No hay items disponibles para este bando.\n";
+                        terminadaCarga = true;
+                    } else {
+                        int idItem = ValidarEntero("   Ingrese ID del item a equipar (0 cancelar): ");
+                        if (idItem != 0) {
+                            // Validar que el ID sea compatible antes de asignar
+                            ImplementoCatalogo* itemBuscado = ConseguirImplementoPorId(catalogo, idItem);
+                            if (itemBuscado && (itemBuscado->bando == "Ambos" || itemBuscado->bando == p->bando)) {
+                                AsignarItemAPersonaje(p, idItem, catalogo);
+                                cout << "   >> " << itemBuscado->nombre << " agregado.\n";
+                            } else {
+                                cout << "   [!] ID invalido o no permitido para este bando.\n";
+                            }
+                        }
+                    }
+                }
+            } // Fin while carga individual
+        }
+        p = p->siguiente;
+    }
+    cout << "\n>> Fase de equipamiento finalizada.\n";
+}
+
+void FaseColocacionInicial(ListaPersonajes& personajes, ListaEstaciones& mapa) {
+    if (mapa.cabeza == nullptr) { cout << "ERROR: Mapa vacio.\n"; return; }
+    
+    cout << "\n=============================================\n";
+    cout << "   FASE DE DESPLIEGUE (Solo Seleccionados)   \n";
+    cout << "=============================================\n";
+
+    // --- MODIFICACION: MOSTRAR GRAFO COMPLETO ---
+    cout << "MAPA DE CONEXIONES DISPONIBLES:\n";
+    cout << "---------------------------------------------\n";
+    
+    Estacion* actual = mapa.cabeza;
+    while (actual != nullptr) {
+        // Imprimimos el nodo origen
+        cout << "Estacion [" << actual->id << "]";
+        
+        // Recorremos su lista de adyacencia (Conexiones)
+        Conexion* conex = actual->listaDeConexiones;
+        if (conex != nullptr) {
+            cout << " conecta con: ";
+            while (conex != nullptr) {
+                // Imprimimos el peso (distancia) opcionalmente, aqui solo mostramos destino
+                cout << "-> [" << conex->destino->id << "] ";
+                conex = conex->siguiente;
+            }
+        } else {
+            cout << " (Sin salidas)";
+        }
+        cout << endl; // Salto de linea para la siguiente estacion
+        actual = actual->siguiente;
+    }
+    cout << "---------------------------------------------\n";
+    // --------------------------------------------
+
+    Personaje* p = personajes.cabeza;
+    while (p != nullptr) {
+        // Solo desplegamos a los que están EN EL EQUIPO
+        if (p->seleccionado && p->estado == "Activo") {
+            
+            cout << "\nPosicionando a: " << p->nombre << " (" << p->bando << ")\n";
+            bool valida = false;
+            while (!valida) {
+                // Ahora el usuario puede ver el grafo arriba para decidir mejor
+                int idEst = ValidarEntero("Ingrese ID Estacion inicial: ");
+                
+                Estacion* buscada = mapa.cabeza;
+                while (buscada != nullptr) {
+                    if (buscada->id == idEst) {
+                        p->posicionActual = buscada;
+                        valida = true;
+                        cout << ">> " << p->nombre << " listo en Estacion " << idEst << ".\n";
+                        break;
+                    }
+                    buscada = buscada->siguiente;
+                }
+                if (!valida) cout << "Estacion no existe.\n";
+            }
+        } else {
+            // Aseguramos que los NO seleccionados no estorben
+            p->posicionActual = nullptr; 
+        }
+        p = p->siguiente;
+    }
+}
+
+void Capturar(Personaje* poli, Personaje* ladron, EstadoDeJuego& estado) {
+    if (poli->posicionActual != ladron->posicionActual) return;
+    
+    cout << "\n¡INTENTO DE ARRESTO! " << poli->nombre << " vs " << ladron->nombre << endl;
+    int dPoli = (rand() % 6) + 1;
+    int dLadron = (rand() % 6) + 1;
+    cout << "   Tirada Policia: [" << dPoli << "] | Ladron: [" << dLadron << "]\n";
+
+    if (dPoli > dLadron) {
+        cout << ">> ¡CAPTURA EXITOSA!\n";
+        ladron->estado = "Capturado";
+        estado.ladronesCapturados++;
+        if (ladron->oroCargado > 0) {
+            cout << ">> BOTIN RECUPERADO: " << ladron->oroCargado << " lingotes.\n";
+            estado.oroRecuperado += ladron->oroCargado;
+            ladron->oroCargado = 0;
+        }
+        RegistrarEvento(poli->nombre + " CAPTURO a " + ladron->nombre, "Todos");
+    } else {
+        cout << ">> ¡FALLIDO! El ladron escapo.\n";
+        RegistrarEvento(ladron->nombre + " ESCAPO de " + poli->nombre, "Todos");
+    }
+}
+
+void AccionInvestigar(Personaje* p) {
+    if (p->bando != "Policia" || !p->posicionActual) return;
+    Estacion* est = p->posicionActual;
+    bool hayOro = (est->oro > 0);
+    cout << "\n--- INVESTIGACION ESTACION " << est->id << " ---\n";
+
+    if (p->corrupto && hayOro) {
+        cout << ">> REPORTE: \"La zona parece limpia. No se detecta oro.\"\n";
+        RegistrarEvento(p->nombre + " reporto zona limpia en Est. " + to_string(est->id), "Todos");
+        RegistrarEvento("¡INFORMANTE! " + p->nombre + " Oculto hallazgo en Est. " + to_string(est->id), "Ladron");
+        return;
+    }
+
+    if (hayOro) {
+        cout << ">> ¡EVIDENCIA! " << est->oro << " lingotes visibles.\n";
+        RegistrarEvento(p->nombre + " confirmo ORO en Est. " + to_string(est->id), "Todos");
+    } else {
+        cout << ">> Zona limpia.\n";
+        RegistrarEvento(p->nombre + " reviso Est. " + to_string(est->id) + " sin novedades.", "Todos");
+    }
+}
+
+void AccionRastrear(Personaje* p) {
+    if (p->bando != "Ladron" || !p->posicionActual) return;
+    cout << "\n--- RASTREO (Scanner) ---\n";
+    Conexion* c = p->posicionActual->listaDeConexiones;
+    bool detectado = false;
+    while (c != nullptr) {
+        cout << "   -> Estacion " << c->destino->id;
+        if (c->destino->oro > 0) {
+            cout << " [!!! ORO DETECTADO !!!]";
+            detectado = true;
+        }
+        cout << endl;
+        c = c->siguiente;
+    }
+    if(!detectado) cout << "   (Sin señales cercanas)\n";
+    RegistrarEvento(p->nombre + " rastreo zona de Est. " + to_string(p->posicionActual->id), "Todos");
+}
+
+// --- LOGICA DE ESCAPE (Para Ladrones) ---
+void AccionEscapar(Personaje* p, EstadoDeJuego& estado) {
+    if(p->bando != "Ladron") return;
+    
+    // Asumimos que las estaciones de los extremos (ej: 1 y 30) son salidas
+    bool esSalida = (p->posicionActual->id == 1 || p->posicionActual->id == 30); 
+    
+    if(esSalida && p->oroCargado > 0) {
+        cout << ">> EXITO: Has sacado el botin de la red de metro.\n";
+        estado.oroRobado += p->oroCargado; // Sumamos al contador global de robo
+        
+        // Bitacora para registro
+        RegistrarEvento("Ladron " + p->nombre + " escapo con " + to_string(p->oroCargado) + " lingotes.", "Todos");
+        
+        p->oroCargado = 0; // Vaciamos la bolsa del ladron
+    } else if (p->oroCargado == 0) {
+        cout << ">> No tienes oro para asegurar.\n";
+    } else {
+        cout << ">> No puedes descargar aqui. Ve a una SALIDA (Estaciones 1 o 30).\n";
+    }
+}
+
+void VerificarCondicionesVictoria(EstadoDeJuego& estado) {
+    // Evitar division por cero
+    if (estado.oroTotalInicial == 0 || estado.totalLadrones == 0) return;
+
+    // 1. Cálculos Matemáticos
+    double pctOroRobado = (double)estado.oroRobado / estado.oroTotalInicial;
+    double pctOroRecuperado = (double)estado.oroRecuperado / estado.oroTotalInicial;
+    double pctLadronesAtrapados = (double)estado.ladronesCapturados / estado.totalLadrones;
+
+    // ---------------------------------------------------------
+    // CONDICION 1: VICTORIA DE LADRONES ("LOS SOMBRAS")
+    // Regla: Escapar con más del 70% del oro
+    // ---------------------------------------------------------
+    if (pctOroRobado > 0.70) {
+        estado.juegoTerminado = true;
+        estado.ganador = "LADRONES (Los Sombras)";
+        cout << "\n\n*********************************************************\n";
+        cout << "                 VICTORIA DE LOS LADRONES                  \n";
+        cout << "*********************************************************\n";
+        cout << " Han escapado con " << (pctOroRobado * 100) << "% del oro (" 
+             << estado.oroRobado << " lingotes).\n";
+        cout << " El sistema financiero de GoldCity ha colapsado.\n";
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // CONDICION 2: VICTORIA POLICIA HONESTA
+    // Regla A: Capturar >= 80% ladrones Y recuperar >= 90% oro
+    // Regla B: Capturar al 100% de los ladrones (Independiente del oro)
+    // ---------------------------------------------------------
+    bool condHonestaA = (pctLadronesAtrapados >= 0.80 && pctOroRecuperado >= 0.90);
+    bool condHonestaB = (estado.ladronesCapturados == estado.totalLadrones);
+
+    if (condHonestaA || condHonestaB) {
+        estado.juegoTerminado = true;
+        estado.ganador = "POLICIA (Honestos)";
+        cout << "\n\n*********************************************************\n";
+        cout << "              VICTORIA DE LA FUERZA POLICIAL               \n";
+        cout << "*********************************************************\n";
+        if(condHonestaB) cout << " Todos los criminales han sido puestos tras las rejas.\n";
+        else cout << " Operacion exitosa: La mayoria del oro y la banda han sido asegurados.\n";
+        return;
+    }
+}
+
+// Función especial para verificar Corruptos al FINAL (Turno límite o sin ladrones)
+void VerificarFinalPartida(EstadoDeJuego& estado) {
+    if (estado.juegoTerminado) return; // Si ya ganó alguien, ignorar.
+
+    double pctOroRobado = (double)estado.oroRobado / estado.oroTotalInicial;
+
+    // ---------------------------------------------------------
+    // CONDICION 3: VICTORIA POLICIA CORRUPTA
+    // Regla: Lograr que escape entre 40% y 60% del oro.
+    // Se verifica cuando ya no quedan movimientos posibles.
+    // ---------------------------------------------------------
+    if (pctOroRobado >= 0.40 && pctOroRobado <= 0.60) {
+        estado.juegoTerminado = true;
+        estado.ganador = "POLICIA CORRUPTA (El Sindicato)";
+        cout << "\n\n*********************************************************\n";
+        cout << "             VICTORIA DE LOS CORRUPTOS                    \n";
+        cout << "*********************************************************\n";
+        cout << " El caso se cerro con un robo parcial (" << (pctOroRobado*100) << "%).\n";
+        cout << " Suficiente para enriquecerse, poco para levantar sospechas.\n";
+    } else {
+        // Si nadie cumplió su condición exacta, gana quien tenga más ventaja
+        cout << "\n\n--- PARTIDA FINALIZADA POR DESGASTE ---\n";
+        cout << "Ningun bando cumplio sus objetivos estrategicos totales.\n";
+        estado.juegoTerminado = true;
+    }
+}
+
+// --- FUNCION AUXILIAR PARA USAR ITEMS ---
+void GestionarUsoDeItem(Personaje* p, EstadoDeJuego& estado, int& bolsaPuntos) {
+    if (p->inventario == nullptr) {
+        cout << "   [!] El inventario esta vacio.\n";
+        return;
+    }
+
+    // 1. Mostrar Lista
+    cout << "\n   --- MOCHILA DE " << p->nombre << " ---\n";
+    ImplementoInventario* actual = p->inventario;
+    int index = 1;
+    while (actual != nullptr) {
+        cout << "   " << index << ". " << actual->itemCatalago->nombre 
+             << " | Usos: " << actual->usosRestantes 
+             << " | Desc: " << actual->itemCatalago->efecto << endl;
+        actual = actual->siguiente;
+        index++;
+    }
+    cout << "   0. Cancelar\n";
+
+    // 2. Seleccionar
+    int seleccion = ValidarEntero("   Seleccione el item a usar: ");
+    if (seleccion == 0) return;
+
+    // 3. Buscar el nodo
+    ImplementoInventario* itemSel = p->inventario;
+    ImplementoInventario* anterior = nullptr;
+    int contador = 1;
+
+    while (itemSel != nullptr && contador < seleccion) {
+        anterior = itemSel;
+        itemSel = itemSel->siguiente;
+        contador++;
+    }
+
+    if (itemSel == nullptr) {
+        cout << "   Opcion invalida.\n";
+        return;
+    }
+
+    string nombre = itemSel->itemCatalago->nombre;
+    bool itemUsado = true; 
+
+    cout << "\n   >> ACTIVANDO: " << nombre << "...\n";
+
+    // --- LOGICA ESPECIFICA PARA LOS 12 ITEMS ---
+
+    // 1. Bomba de Humo (Ladron)
+    if (nombre == "Bomba de Humo") {
+        cout << "   [EVASION] ¡Puuuff! Desapareces en una nube de humo.\n";
+        cout << "   +10 Puntos de Movimiento para huir lejos.\n";
+        bolsaPuntos += 10;
+    }
+    // 2. Jamelgo de Distracción (Ladron)
+    else if (nombre == "Jamelgo de Distracción") {
+        cout << "   [DISTRACCION] Creas un caos en la estacion.\n";
+        cout << "   +5 Puntos de Movimiento extra.\n";
+        bolsaPuntos += 5;
+    }
+    // 3. Patines Eléctricos (Policia)
+    else if (nombre == "Patines Eléctricos") {
+        cout << "   [VELOCIDAD] Te desplazas rapidamente por los pasillos.\n";
+        cout << "   +4 Puntos de Movimiento.\n";
+        bolsaPuntos += 4;
+    }
+    // 4. Llave Maestra (Ladron)
+    else if (nombre == "Llave Maestra") {
+        cout << "   [CONTROL] Has forzado una caja de seguridad oculta.\n";
+        cout << "   Recuperas oro automaticamente si hay en la sala (incluso sin capacidad).\n";
+        if (p->posicionActual->oro > 0) {
+            p->oroCargado++; 
+            p->posicionActual->oro--;
+            cout << "   >> ¡Has robado 1 lingote extra con la llave!\n";
+        } else {
+            cout << "   (No hay oro aqui para usar la llave, pero gastaste un uso).\n";
+        }
+    }
+    // 5. Cable de Extracción (Ladron)
+    else if (nombre == "Cable de Extracción") {
+        cout << "   [ROBO REMOTO] Intentando enganchar botin de estaciones vecinas...\n";
+        Conexion* c = p->posicionActual->listaDeConexiones;
+        bool robado = false;
+        while(c != nullptr) {
+            if(c->destino->oro > 0 && p->oroCargado < p->capacidadDeCarga) {
+                c->destino->oro--;
+                p->oroCargado++;
+                cout << "   >> ¡Exito! Robaste 1 lingote de la Estacion " << c->destino->id << " a distancia.\n";
+                robado = true;
+                break; // Solo roba uno
+            }
+            c = c->siguiente;
+        }
+        if(!robado) cout << "   Fallido. No hay oro cerca o tu bolsa esta llena.\n";
+    }
+    // 6. Inmovilizador Sónico (Policia)
+    else if (nombre == "Inmovilizador Sónico") {
+        cout << "   [ATURDIR] Disparas una onda sonica.\n";
+        // Simulamos que el proximo intento de captura seria automatico, o simplemente impedimos escape.
+        // Por simplicidad: Detecta ladrones ocultos en la misma sala.
+        cout << "   Cualquier ladron en esta sala ha sido revelado y no podra usar items defensivos.\n";
+        VerificarEnemigosEnZona(p, *(new ListaPersonajes())); // Hack visual, en realidad es narrativo.
+    }
+    // 7. Sensor de Calor (Ladron)
+    else if (nombre == "Sensor de Calor") {
+        cout << "   [ESCANER TERMICO] Buscando firmas de calor (Policias/Oro) en radio 3...\n";
+        AccionRastrear(p); // Reutilizamos la funcion base pero narramos que es mejor
+    }
+    // 8. Drone de Rastreo (Policia)
+    else if (nombre == "Drone de Rastreo") {
+        cout << "   [VIGILANCIA AEREA] El drone vuela alto (Alcance 6).\n";
+        // Escaneo profundo
+        Conexion* c = p->posicionActual->listaDeConexiones;
+        while(c){
+            cout << "   Estacion " << c->destino->id << ": " << (c->destino->oro > 0 ? "HAY ORO" : "Despejado") << endl;
+            // Escanear los vecinos de los vecinos (profundidad 2 simulada)
+            Conexion* c2 = c->destino->listaDeConexiones;
+            while(c2) {
+                 if(c2->destino->oro > 0) cout << "      -> Detectado oro en Estacion lejana " << c2->destino->id << endl;
+                 c2 = c2->siguiente;
+            }
+            c = c->siguiente;
+        }
+    }
+    // 9. Linterna UV Forense (Policia)
+    else if (nombre == "Linterna UV Forense") {
+        cout << "   [INVESTIGACION] Buscando huellas dactilares...\n";
+        AccionInvestigar(p);
+        cout << "   (La linterna asegura que no se te escapo ningun detalle).\n";
+    }
+    // 10. Chaqueta Reforzada (Ladron)
+    else if (nombre == "Chaqueta Reforzada") {
+        cout << "   [DEFENSA] Te ajustas el blindaje.\n";
+        p->puntosDeVida += 50;
+        cout << "   Recuperas salud/resistencia. HP Actual: " << p->puntosDeVida << endl;
+    }
+    // 11. Escudo Táctico (Policia)
+    else if (nombre == "Escudo Táctico") {
+        cout << "   [DEFENSA] Despliegas el escudo antidisturbios.\n";
+        p->puntosDeVida += 50;
+        cout << "   Blindaje aumentado. HP Actual: " << p->puntosDeVida << endl;
+    }
+    // 12. Estimulante de Combate (Policia)
+    else if (nombre == "Estimulante de Combate") {
+        cout << "   [ADRENALINA] Inyectando estimulante...\n";
+        cout << "   Tus reflejos estan al maximo. Puntos de movimiento restaurados.\n";
+        bolsaPuntos += 6;
+    }
+    else {
+        cout << "   [!] Item generico usado (" << nombre << ").\n";
+    }
+
+    // 5. DESGASTE Y ELIMINACIÓN
+    if (itemUsado) {
+        itemSel->usosRestantes--;
+        cout << "   (Usos restantes: " << itemSel->usosRestantes << ")\n";
+
+        if (itemSel->usosRestantes <= 0) {
+            cout << "   [ROTO] El " << nombre << " se ha agotado. Desechando...\n";
+            
+            if (anterior == nullptr) {
+                p->inventario = itemSel->siguiente;
+            } else {
+                anterior->siguiente = itemSel->siguiente;
+            }
+            delete itemSel; 
+        }
+    }
+}
+
+// --- FUNCIONES DE PERSISTENCIA (GUARDAR) ---
+
+void GuardarMapa(ListaEstaciones& mapa) {
+    ofstream archivo("Estado_Mapa.tren"); // Guardamos en un archivo nuevo para no dañar el original por si acaso
+    if (archivo.is_open()) {
+        archivo << "30\n"; // Encabezado dummy
+        Estacion* actual = mapa.cabeza;
+        while (actual != nullptr) {
+            archivo << actual->id << endl;
+            archivo << actual->nombre << endl;
+            archivo << "-\n";
+            
+            // Reconstruir string de conexiones: "2:5|3:10"
+            Conexion* c = actual->listaDeConexiones;
+            while (c != nullptr) {
+                archivo << c->destino->id << ":" << c->peso;
+                if (c->siguiente != nullptr) archivo << "|";
+                c = c->siguiente;
+            }
+            archivo << "\n---\n";
+            actual = actual->siguiente;
+        }
+        archivo.close();
+    }
+}
+
+void GuardarPersonajes(ListaPersonajes& personajes) {
+    ofstream archivo("Estado_Personajes.tren");
+    if (archivo.is_open()) {
+        archivo << "12\n"; // Encabezado dummy
+        Personaje* p = personajes.cabeza;
+        while (p != nullptr) {
+            archivo << p->Id << endl;
+            archivo << p->bando << endl;
+            archivo << p->nombre << endl;
+            
+            // Reconstruir items: "3|6"
+            if (p->inventario == nullptr) {
+                archivo << "-\n";
+            } else {
+                ImplementoInventario* inv = p->inventario;
+                while (inv != nullptr) {
+                    archivo << inv->itemCatalago->id;
+                    if (inv->siguiente != nullptr) archivo << "|";
+                    inv = inv->siguiente;
+                }
+                archivo << endl;
+            }
+            archivo << "---\n";
+            p = p->siguiente;
+        }
+        archivo.close();
+    }
+}
+
+void GuardarProgreso(ListaEstaciones& mapa, ListaPersonajes& personajes) {
+    GuardarMapa(mapa);
+    GuardarPersonajes(personajes);
+    // cout << "(Autoguardado completado...)\n"; // Descomentar si quieres ver cuando guarda
+}
+
+void JugarPartida(EstadoDeJuego& estado, ListaPersonajes& personajes, ListaEstaciones& mapa, ListaImplementosCatalogo& catalogo) {
+    // 1. FASE DE DESPLIEGUE INICIAL
+    FaseColocacionInicial(personajes, mapa);
+
+    ListaDados dados; 
+    bool turnoPolicia = true; 
+    
+    if (personajes.cabeza != nullptr && personajes.cabeza->posicionActual == nullptr) return;
+
+    cout << "\n\n";
+    cout << "##################################################\n";
+    cout << "#                                                #\n";
+    cout << "#       C O M I E N Z A   L A   C A Z A        #\n";
+    cout << "#                                                #\n";
+    cout << "##################################################\n";
+    
+    // --- BUCLE PRINCIPAL DEL JUEGO ---
+    while (!estado.juegoTerminado) {
+        string bandoActual = turnoPolicia ? "Policia" : "Ladron";
+        string etiquetaBando = turnoPolicia ? "FUERZAS POLICIALES" : "SINDICATO DE LADRONES";
+        
+        cout << "\n\n";
+        cout << "==========================================================\n";
+        cout << " TURNO " << estado.turnoActual << "  |  JUEGAN: " << etiquetaBando << "\n";
+        cout << "==========================================================\n";
+        
+        MostrarResumenTurno(bandoActual);
+        
+        LimpiarDados(dados);
+        int bolsaPuntos = 0; 
+        
+        cout << "\n[ FASE DE PLANIFICACION ]\n";
+        cout << " Lanzando dados tacticos... \n";
+        cout << " Resultados: ";
+        for (int i = 0; i < 4; i++) {
+            int val = (rand() % 6) + 1;
+            AgregarDado(dados, val);
+            bolsaPuntos += val;
+            cout << "[ " << val << " ] ";
+        }
+        cout << "\n\n";
+        cout << " +--------------------------------------+\n";
+        cout << " |  PUNTOS DE MOVIMIENTO TOTALES:  " << (bolsaPuntos < 10 ? "0" : "") << bolsaPuntos << "   |\n";
+        cout << " +--------------------------------------+\n";
+        
+        bool turnoActivo = true;
+
+        while (turnoActivo && bolsaPuntos > 0) {
+            cout << "\n----------------------------------------------------------\n";
+            cout << " MENU DE COMANDO (Puntos Restantes: " << bolsaPuntos << ")\n";
+            cout << "----------------------------------------------------------\n";
+            cout << "  1. >> ACTIVAR UN AGENTE (Mover/Accion)\n";
+            cout << "  2. >> FINALIZAR TURNO (Descartar puntos)\n";
+            cout << "----------------------------------------------------------\n";
+            int opMenu = ValidarEntero(" Seleccione opcion: ");
+
+            if (opMenu == 2) {
+                turnoActivo = false;
+                break;
+            }
+
+            Personaje* pSel = nullptr;
+            do {
+                cout << "\n   [ AGENTES DISPONIBLES EN CAMPO ]\n";
+                
+                Personaje* show = personajes.cabeza;
+                bool hayPersonajes = false;
+                while(show != nullptr){
+                    if(show->bando == bandoActual && show->seleccionado && show->estado == "Activo"){
+                         cout << "   " << show->Id << ". " << show->nombre 
+                              << " (" << show->tipo << ") "
+                              << "-> Estacion " << (show->posicionActual ? to_string(show->posicionActual->id) : "N/A");
+                         if(show->oroCargado > 0) cout << " [$$]";
+                         // Indicador de Items
+                         if (show->inventario != nullptr) cout << " [Items]"; 
+                         cout << "\n";
+                         hayPersonajes = true;
+                    }
+                    show = show->siguiente;
+                }
+                cout << "\n";
+
+                if (!hayPersonajes) {
+                    cout << "   [!] CRITICO: No quedan agentes activos en este bando.\n";
+                    turnoActivo = false; 
+                    break;
+                }
+
+                int id = ValidarEntero(" > Ingrese ID del agente a activar: ");
+                
+                Personaje* aux = personajes.cabeza;
+                while(aux != nullptr) {
+                    if(aux->Id == id && aux->bando == bandoActual && aux->estado == "Activo" && aux->seleccionado) {
+                        pSel = aux; break;
+                    }
+                    aux = aux->siguiente;
+                }
+                if(!pSel) cout << "   [!] Error: ID invalido, agente de otro bando o inactivo.\n";
+            } while(!pSel && turnoActivo);
+            
+            if (!turnoActivo) break;
+
+            RecogerOroAutomatico(pSel);
+            if(turnoPolicia) VerificarEnemigosEnZona(pSel, personajes);
+
+            // --- MOVIMIENTO ---
+            bool moviendoPersonaje = true;
+            while (moviendoPersonaje && bolsaPuntos > 0) {
+                cout << "\n   .:: ESTADO DE SITUACION ::.\n";
+                cout << "   Agente: " << pSel->nombre << "\n";
+                cout << "   Ubicacion Actual: [ ESTACION " << pSel->posicionActual->id << " ]\n";
+                cout << "   Puntos Globales:  " << bolsaPuntos << "\n";
+                cout << "   Conexiones:\n";
+                
+                Conexion* cx = pSel->posicionActual->listaDeConexiones;
+                bool tieneSalida = false;
+                while(cx != nullptr) {
+                    cout << "      --> Ir a [ ESTACION " << cx->destino->id << " ] (Costo: " << cx->peso << ")\n";
+                    cx = cx->siguiente;
+                    tieneSalida = true;
+                }
+                if(!tieneSalida) cout << "      (Sin salidas disponibles)\n";
+
+                cout << "\n   > Ingrese ID destino (0 para terminar movimiento): ";
+                int idDestino; cin >> idDestino;
+
+                if (idDestino == 0) {
+                    moviendoPersonaje = false;
+                } else {
+                    Conexion* c = pSel->posicionActual->listaDeConexiones;
+                    bool esVecino = false; 
+                    int costo = 0;
+                    while (c) {
+                        if (c->destino->id == idDestino) { esVecino = true; costo = c->peso; break; }
+                        c = c->siguiente;
+                    }
+
+                    if (esVecino) {
+                        if (bolsaPuntos >= costo) {
+                            bolsaPuntos -= costo;
+                            MoverPersonaje(pSel, c->destino, personajes); 
+                        } else {
+                            cout << "   [!] ALERTA: Puntos insuficientes.\n";
+                        }
+                    } else {
+                        cout << "   [!] ALERTA: No es una conexion directa.\n";
+                    }
+                }
+            } 
+
+            // --- MENU DE ACCIONES TACTICAS (ACTUALIZADO CON ITEMS) ---
+            cout << "\n   [ OPCIONES TACTICAS ]\n";
+            cout << "   1. Usar Habilidad Basica (" << (turnoPolicia ? "Investigar" : "Rastrear") << ")\n";
+            
+            if (turnoPolicia) {
+                cout << "   2. Intentar Capturar (Requiere objetivo en zona)\n";
+            } else {
+                cout << "   2. (Opcion reservada a Policias)\n"; 
+            }
+            
+            // NUEVA OPCION 3
+            cout << "   3. USAR IMPLEMENTO (Inventario)\n"; 
+            
+            cout << "   4. Ninguna / Volver\n";
+            
+            if (!turnoPolicia) {
+                cout << "   5. ESCAPAR CON ORO (Solo en Salidas)\n";
+            }
+
+            int opAccion = ValidarEntero("   Seleccion: ");
+            
+            if (opAccion == 1) {
+                if(turnoPolicia) AccionInvestigar(pSel);
+                else AccionRastrear(pSel);
+            } 
+            else if (opAccion == 2 && turnoPolicia) {
+                Personaje* victima = personajes.cabeza;
+                bool capturaPosible = false;
+                while (victima != nullptr) {
+                    if (victima->bando == "Ladron" && 
+                        victima->posicionActual == pSel->posicionActual &&
+                        victima->estado == "Activo") {
+                        
+                        Capturar(pSel, victima, estado);
+                        capturaPosible = true;
+                        break; 
+                    }
+                    victima = victima->siguiente;
+                }
+                if (!capturaPosible) cout << "   [!] SCANNER NEGATIVO: No hay objetivos validos en la estacion.\n";
+            }
+            // --- NUEVA LÓGICA DE ITEMS ---
+            else if (opAccion == 3) {
+                GestionarUsoDeItem(pSel, estado, bolsaPuntos);
+            }
+            // -----------------------------
+            else if (opAccion == 5 && !turnoPolicia) {
+                AccionEscapar(pSel, estado);
+            }
+        
+        } // Fin while turnoActivo
+        
+        VerificarCondicionesVictoria(estado);
+
+        if (estado.juegoTerminado) break; 
+
+        // CAMBIO DE TURNO
+        if (!turnoPolicia) {
+            estado.turnoActual++;
+            // Limite de turnos para victoria corrupta (opcional)
+            if (estado.turnoActual > 20) { 
+                cout << "\n>> LIMITE DE TIEMPO ALCANZADO.\n";
+                VerificarFinalPartida(estado);
+                if(estado.juegoTerminado) break;
+            }
+        }
+        
+        GuardarProgreso(mapa, personajes);
+        
+        turnoPolicia = !turnoPolicia;
+        
+        if(!estado.juegoTerminado) {
+            cout << "\n\n";
+            cout << "----------------------------------------------------------\n";
+            cout << " FIN DEL TURNO. Presione ENTER para continuar...";
+            cin.ignore(); cin.get();
+        }
+
+    } // Fin del While principal
+    
+    cout << "\n==========================================\n";
+    cout << "          FIN DE LA SIMULACION            \n";
+    cout << "==========================================\n";
+    if (estado.juegoTerminado) {
+        cout << "RESULTADO FINAL: " << estado.ganador << endl;
+        cout << "Oro Robado: " << estado.oroRobado << " | Oro Recuperado: " << estado.oroRecuperado << endl;
+    } else {
+        cout << "Partida interrumpida.\n";
+    }
+}
+
+int main() {
+    // 1. Semilla y Estructuras
+    srand(static_cast<unsigned int>(time(0)));
+    ListaPersonajes personajes;
+    ListaEstaciones mapa;
+    ListaImplementosCatalogo catalogo;
+    EstadoDeJuego estado;
+
+    cout << "\n======================================================\n";
+    cout << "   SISTEMA TACTICO: OPERACION 'METRO DE CARACAS'      \n";
+    cout << "             Policias vs Ladrones                     \n";
+    cout << "======================================================\n\n";
+
+    // 2. Carga de Archivos
+    cout << "--- INICIANDO PROTOCOLO DE CARGA DE DATOS ---\n";
+    CargarMapa(mapa, "Mapa (2).tren"); 
+    CargaImplementos(catalogo, "accesorios (2).tren");
+    CargarPersonajes(personajes, catalogo, "personajes (4).tren");
+
+    if (mapa.cabeza == nullptr) {
+        cout << "\n[!] ERROR CRITICO: Mapa no cargado.\n";
+        return 1;
+    }
+
+    // 3. Configuración de Partida
+    cout << "\nDatos cargados. Iniciando configuracion...\n";
+    
+    // A. Crear extras (opcional)
+    FaseCreacionOpcional(personajes);
+
+    // B. Elegir Equipos (Draft)
+    FaseSeleccionEquipos(personajes);
+
+    // C. >>> NUEVO: FASE DE EQUIPAMIENTO <<<
+    // Aquí es donde el jugador elige sus armas/items antes de empezar
+    FaseEquipamiento(personajes, catalogo);
+
+    // D. Inicializar Estado (Repartir oro, asignar corruptos aleatorios)
+    InicializarEstado(estado, mapa, personajes);
+
+    // 4. Iniciar Juego
+    JugarPartida(estado, personajes, mapa, catalogo);
+
+    // 5. Limpieza
+    cout << "\nLiberando recursos...\n";
+    LiberarPersonajes(personajes);
+    LiberarEstaciones(mapa);
+    LiberarCatalogo(catalogo);
+
+    return 0;
+}
